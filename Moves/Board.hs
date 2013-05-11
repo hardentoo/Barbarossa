@@ -1,7 +1,7 @@
 {-# LANGUAGE TypeSynonymInstances, MultiParamTypeClasses, PatternGuards, BangPatterns #-}
 module Moves.Board (
     posFromFen, initPos,
-    inCheck,
+    inCheck, isCheck,
     goPromo, hasMoves,
     genmv, genmvT,
     genMoveCapt, genMoveCast, genMoveNCapt, genMoveTransf, genMoveFCheck,
@@ -489,13 +489,21 @@ stageValue Rook   = 450
 stageValue Queen  = 900
 stageValue _      = 0		-- pawns and kings don't count
 
+{-# INLINE isCheck #-}
+isCheck :: MyPos -> Color -> Bool
+isCheck p White = white p .&. kings p .&. blAttacs p /= 0
+isCheck p Black = black p .&. kings p .&. whAttacs p /= 0
+
 inCheck, kingsOk, checkOk :: MyPos -> Bool
 {-# INLINE inCheck #-}
 {-# INLINE kingsOk #-}
 {-# INLINE checkOk #-}
+{-
 inCheck p = whincheck /= 0 || blincheck /= 0
     where !whincheck = white p .&. kings p .&. blAttacs p
           !blincheck = black p .&. kings p .&. whAttacs p
+-}
+inCheck p = isCheck p White || isCheck p Black
 kingsOk p = exactOne (kings p .&. white p)
          && exactOne (kings p .&. black p)
 checkOk p = if nextmovewhite then blincheck == 0 else whincheck == 0
@@ -503,33 +511,31 @@ checkOk p = if nextmovewhite then blincheck == 0 else whincheck == 0
           !whincheck = white p .&. kings p .&. blAttacs p
           !blincheck = black p .&. kings p .&. whAttacs p
 
-data ChangeAccum = CA !ZKey !Int !Int
+data ChangeAccum = CA !ZKey !Int
 
 -- Accumulate a set of changes in MyPos (except BBoards) due to setting a piece on a square
 accumSetPiece :: Square -> Color -> Piece -> MyPos -> ChangeAccum -> ChangeAccum
-accumSetPiece sq c f p (CA z m s)
+accumSetPiece sq c f p (CA z s)
     = case tabla p sq of
-        Empty      -> CA znew mnew snew
-        Busy co fo -> accumCapt sq co fo znew mnew snew
+        Empty      -> CA znew snew
+        Busy co fo -> accumCapt sq co fo znew snew
     where !znew = z `xor` zobPiece c f sq
-          !mnew = m + matPiece c f
           !snew = stageValue f
 
 -- Accumulate a set of changes in MyPos (except BBoards) due to clearing a square
 accumClearSq :: Square -> MyPos -> ChangeAccum -> ChangeAccum
-accumClearSq sq p i@(CA z m s)
+accumClearSq sq p i@(CA z s)
     = case tabla p sq of
         Empty      -> i
-        Busy co fo -> accumCapt sq co fo z m s
+        Busy co fo -> accumCapt sq co fo z s
 
-accumCapt :: Square -> Color -> Piece -> ZKey -> Int -> Int -> ChangeAccum
-accumCapt sq co fo z m s = CA (z `xor` zco) (m - mco) (s - sco)
+accumCapt :: Square -> Color -> Piece -> ZKey -> Int -> ChangeAccum
+accumCapt sq co fo z s = CA (z `xor` zco) (s - sco)
     where !zco = zobPiece co fo sq
-          !mco = matPiece co fo
           !sco = stageValue fo
 
 accumMoving :: MyPos -> ChangeAccum -> ChangeAccum
-accumMoving _ (CA z m s) = CA (z `xor` zobMove) m s
+accumMoving _ (CA z s) = CA (z `xor` zobMove) s
 
 -- Take an initial accumulation and a list of functions accum to accum
 -- and compute the final accumulation
@@ -609,7 +615,7 @@ mvBit !src !dst !w	-- = w `xor` ((w `xor` (shifted .&. nbsrc)) .&. mask)
 -- doFromToMove :: Square -> Square -> MyPos -> Maybe MyPos
 doFromToMove :: Move -> MyPos -> MyPos
 doFromToMove m p | moveIsNormal m = updatePos p {
-                                        basicPos = nbp, zobkey = tzobkey, mater = tmater, stage = tstage
+                                        basicPos = nbp, zobkey = tzobkey, stage = tstage
                                     }
     where nbp = BPos {
               bpblack = tblack, bpslide = tslide, bpkkrq  = tkkrq,  bpdiag  = tdiag,
@@ -631,8 +637,8 @@ doFromToMove m p | moveIsNormal m = updatePos p {
           -- Here: we have to xor with the zobrist keys for casts! Only when rights change!
           tepcas' = clearCast src $ clearCast dst $ epcas p `xor` mvMask	-- to do: ep
           tepcas  = if irevers then reset50Moves tepcas' else addHalfMove tepcas'
-          CA tzobkey tmater tstage = case tabla p src of	-- identify the moving piece
-               Busy col fig -> chainAccum (CA (zobkey p) (mater p) (stage p)) [
+          CA tzobkey tstage = case tabla p src of	-- identify the moving piece
+               Busy col fig -> chainAccum (CA (zobkey p) (stage p)) [
                                    accumClearSq src p,
                                    accumSetPiece dst col fig p,
                                    accumMoving p
@@ -642,7 +648,7 @@ doFromToMove m p | moveIsNormal m = updatePos p {
                                  ++ "resulting pos:\n"
                                  ++ showTab tblack tslide tkkrq tdiag
 doFromToMove m p | moveIsEnPas m = updatePos p {
-                                       basicPos = nbp, zobkey = tzobkey, mater = tmater
+                                       basicPos = nbp, zobkey = tzobkey
                                    }
     where nbp = BPos {
               bpblack = tblack, bpslide = tslide, bpkkrq  = tkkrq,  bpdiag  = tdiag,
@@ -661,14 +667,14 @@ doFromToMove m p | moveIsEnPas m = updatePos p {
           Busy col fig  = tabla p src	-- identify the moving piece
           Busy _   Pawn = tabla p del	-- identify the captured piece (pawn)
           -- Here the stage will not be changes
-          CA tzobkey tmater _      = chainAccum (CA (zobkey p) (mater p) (stage p)) [
-                                         accumClearSq src p,
-                                         accumClearSq del p,
-                                         accumSetPiece dst col fig p,
-                                         accumMoving p
-                                     ]
+          CA tzobkey _  = chainAccum (CA (zobkey p) (stage p)) [
+                              accumClearSq src p,
+                              accumClearSq del p,
+                              accumSetPiece dst col fig p,
+                              accumMoving p
+                          ]
 doFromToMove m p | moveIsTransf m = updatePos p0 {
-                                        basicPos = nbp, zobkey = tzobkey, mater = tmater, stage = tstage
+                                        basicPos = nbp, zobkey = tzobkey, stage = tstage
                                     }
     where nbp = BPos {
               bpblack = tblack, bpslide = tslide, bpkkrq = tkkrq, bpdiag = tdiag,
@@ -684,14 +690,12 @@ doFromToMove m p | moveIsTransf m = updatePos p0 {
           tkkrq  = mvBit src dst $ kkrq p0
           tdiag  = mvBit src dst $ diag p0
           tepcas = reset50Moves $ epcas p `xor` mvMask	-- to do: ep
-          CA tzobkey tmater tstage = chainAccum (CA (zobkey p0) (mater p0) (stage p0)) [
-                                         accumClearSq src p0,
-                                         accumSetPiece dst col pie p0,
-                                         accumMoving p0
-                                     ]
-doFromToMove m p | moveIsCastle m = updatePos p {
-                                        basicPos = nbp, zobkey = tzobkey, mater = tmater
-                                    }
+          CA tzobkey tstage = chainAccum (CA (zobkey p0) (stage p0)) [
+                                  accumClearSq src p0,
+                                  accumSetPiece dst col pie p0,
+                                  accumMoving p0
+                              ]
+doFromToMove m p | moveIsCastle m = updatePos p { basicPos = nbp, zobkey = tzobkey }
     where nbp = BPos {
               bpblack = tblack, bpslide = tslide, bpkkrq  = tkkrq,  bpdiag  = tdiag,
               bpepcas = tepcas
@@ -717,20 +721,20 @@ doFromToMove m p | moveIsCastle m = updatePos p {
           Busy col King = tabla p src	-- identify the moving piece (king)
           Busy co1 Rook = tabla p csr	-- identify the moving rook
           -- Here the stage will not be changed
-          CA tzobkey tmater _      = chainAccum (CA (zobkey p) (mater p) (stage p)) [
-                                         accumClearSq src p,
-                                         accumSetPiece dst col King p,
-                                         accumClearSq csr p,
-                                         accumSetPiece cds co1 Rook p,
-                                         accumMoving p
-                                     ]
+          CA tzobkey _  = chainAccum (CA (zobkey p) (stage p)) [
+                              accumClearSq src p,
+                              accumSetPiece dst col King p,
+                              accumClearSq csr p,
+                              accumSetPiece cds co1 Rook p,
+                              accumMoving p
+                          ]
 doFromToMove _ _ = error "doFromToMove: wrong move type"
 
 reverseMoving :: MyPos -> MyPos
 reverseMoving p = p { basicPos = nbp, zobkey = z }
     where nbp = (basicPos p) { bpepcas = tepcas }
           tepcas = epcas p `xor` mvMask
-          CA z _ _ = chainAccum (CA (zobkey p) (mater p) (stage p)) [
-                         accumMoving p
-                     ]
+          CA z _ = chainAccum (CA (zobkey p) (stage p)) [
+                       accumMoving p
+                   ]
 -- Here is not clear what to do with castle and en passant...

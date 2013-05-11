@@ -46,10 +46,12 @@ data AnyEvalItem = forall a . EvalItem a => EvIt a
 -- Every item can have one or more parameters which have a name, a default value
 -- and a range of values (values are kept for learning purposes as doubles,
 -- but for the evaluation itself one copy of integer parameter values is also kept)
+-- Item Material must be first in the list, as the material must be known in other
+-- places too, so it is picked up from the fist place
 evalItems :: [AnyEvalItem]
-evalItems = [ EvIt Material,	-- material balance (i.e. white - black material
+evalItems = [ EvIt Material,	-- material balance (i.e. white - black material)
               -- EvIt EnPrise,	-- when not quiescent - pieces en prise
-              -- EvIt Redundance,	-- bishop pair and rook redundance
+              EvIt Redundance,	-- bishop pair and rook redundance
               -- EvIt NRCorrection,	-- material correction for knights & rooks
               EvIt RookPawn,	-- the rook pawns are about 15% less valuable
               EvIt KingSafe,	-- king safety
@@ -139,14 +141,15 @@ a <*> b = sum $ zipWith (*) a b
 matesc :: Int
 matesc = 20000 - 255	-- attention, this is also defined in Base.hs!!
 
-posEval :: MyPos -> Color -> State EvalState (Int, [Int])
+posEval :: MyPos -> Color -> State EvalState (Int, Int, [Int])
 posEval !p !c = do
     sti <- get
     let (sc''', feat) = evalDispatch p c sti
         !sc'  = if sc''' > matesc then matesc else if sc''' < -matesc then -matesc else sc'''
         !sc'' = if granCoarse > 0 then (sc' + granCoarse2) .&. granCoarseM else sc'
         !sc = if c == White then sc'' else -sc''
-    return $! sc `seq` (sc, feat)
+        !matv = head feat
+    return (sc, matv, feat)
 
 evalDispatch :: MyPos -> Color -> EvalState -> (Int, [Int])
 evalDispatch p c sti
@@ -203,7 +206,7 @@ winBonus :: Int
 winBonus = 200	-- when it's known win
 
 mateKBBK :: MyPos -> Bool -> Int
-mateKBBK p wwin = mater p + if wwin then sc else -sc
+mateKBBK p wwin = materDiff p White + if wwin then sc else -sc	-- color is not needed
     where kadv = if wwin then kb else kw
           kw = kingSquare (kings p) (white p)
           kb = kingSquare (kings p) (black p)
@@ -212,7 +215,7 @@ mateKBBK p wwin = mater p + if wwin then sc else -sc
           sc = winBonus + distc*distc - distk*distk
 
 mateKBNK :: MyPos -> Bool -> Int
-mateKBNK p wwin = mater p + if wwin then sc else -sc
+mateKBNK p wwin = materDiff p White + if wwin then sc else -sc	-- color is not needed
     where kadv = if wwin then kb else kw
           kw = kingSquare (kings p) (white p)
           kb = kingSquare (kings p) (black p)
@@ -222,7 +225,7 @@ mateKBNK p wwin = mater p + if wwin then sc else -sc
           sc = winBonus + distc*distc - distk*distk
 
 mateKMajxK :: MyPos -> Bool -> Int
-mateKMajxK p wwin = mater p + if wwin then sc else -sc
+mateKMajxK p wwin = materDiff p White + if wwin then sc else -sc	-- color is not needed
     where kadv = if wwin then kb else kw
           kw = kingSquare (kings p) (white p)
           kb = kingSquare (kings p) (black p)
@@ -307,35 +310,39 @@ kingSquare kingsb colorp = head $ bbToSquares $ kingsb .&. colorp
 data Material = Material
 
 instance EvalItem Material where
-    evalItem p c _ = materDiff p c
+    evalItem p c _ = [materDiff p c]
     evalItemNDL _ = [("materialDiff", (8, (8, 8)))]
 
 -- We will not count the material incremental, as with the change of values based on stage and
 -- position openness this is not feasible anymore
-materDiff :: MyPos -> Color -> IParams
-materDiff p _ = [md]
+materDiff :: MyPos -> Color -> Int
+materDiff p _ = md
     where !md = mw - mb
           !wp = popCount1 $ pawns p .&. white p
           !bp = popCount1 $ pawns p .&. black p
-          !wn = popCount1 $ knights p .&. white p
-          !bn = popCount1 $ knights p .&. black p
-          !wb = popCount1 $ bishops p .&. white p
-          !bb = popCount1 $ bishops p .&. black p
-          !wr = popCount1 $ rooks p .&. white p
-          !br = popCount1 $ rooks p .&. black p
-          !wq = popCount1 $ queens p .&. white p
-          !bq = popCount1 $ queens p .&. black p
-          !grd = wp + bp
-          !mw = wp * gradedMatVal Pawn (stage p)
-              + wn * gradedMatVal Knight grd
-              + wb * gradedMatVal Bishop grd
-              + wr * gradedMatVal Rook   grd
-              + wq * gradedMatVal Queen  grd
-          !mb = bp * gradedMatVal Pawn (stage p)
-              + bn * gradedMatVal Knight grd
-              + bb * gradedMatVal Bishop grd
-              + br * gradedMatVal Rook   grd
-              + bq * gradedMatVal Queen  grd
+          grd = wp + bp
+          !mw = materColor p White wp grd
+          !mb = materColor p Black bp grd
+
+materColor :: MyPos -> Color -> Int -> Int -> Int
+materColor p c !wp !grd = mw
+    where !my = case c of
+                     White -> white p
+                     Black -> black p
+          !wn = popCount1 $ knights p .&. my
+          !wb = popCount1 $ bishops p .&. my
+          !wr = popCount1 $ rooks p .&. my
+          !wq = popCount1 $ queens p .&. my
+          !wpv = gradedMatVal Pawn (stage p)
+          !wnv = gradedMatVal Knight grd
+          !wbv = gradedMatVal Bishop grd
+          !wrv = gradedMatVal Rook   grd
+          !wqv = gradedMatVal Queen  grd
+          !mw0 = wp * wpv
+          !mw1 = mw0 + wn * wnv
+          !mw2 = mw1 + wb * wbv
+          !mw3 = mw2 + wr * wrv
+          !mw  = mw3 + wq * wqv
 
 ------ King openness ------
 data KingOpen = KingOpen

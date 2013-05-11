@@ -1,3 +1,4 @@
+{-# LANGUAGE BangPatterns #-}
 module Eval.BasicEval (
     matPiece, gradedMatVal
 ) where
@@ -24,14 +25,19 @@ matPiece Black = negate . unsafeAt matvals . unsafeIndex (Pawn, King)
 -- The pawns are graded by the stage
 -- The pieces are graded based on number of pawns
 gradedMatVal :: Piece -> Int -> Int
-gradedMatVal King _ = error "King graded??"
-gradedMatVal Queen  i = unsafeAt  queenGrades i
-gradedMatVal Rook   i = unsafeAt   rookGrades i
-gradedMatVal Bishop i = unsafeAt bishopGrades i
-gradedMatVal Knight i = unsafeAt knightGrades i
+gradedMatVal King   !i = error "King graded??"
+gradedMatVal Queen  !i = unsafeAt  queenGrades i
+gradedMatVal Rook   !i = unsafeAt   rookGrades i
+gradedMatVal Bishop !i = unsafeAt bishopGrades i
+gradedMatVal Knight !i = unsafeAt knightGrades i
 -- Tricky here: we know is must be in centipawns, but calculate in 8th of that
 -- to be more precise. The pawn value is included in the function! (Now 100)
-gradedMatVal Pawn   s = min 115 $ max 100 $ (980 - s `div` 25) `unsafeShiftR` 3
+gradedMatVal Pawn   !s = case v > 115 of
+                             True -> 115
+                             _    -> case v < 100 of
+                                         True -> 100
+                                         _    -> v
+    where !v = (24500 - s) `div` 200
 
 queenGrades, rookGrades, bishopGrades, knightGrades :: UArray Int Int
 -- These arrays are used to grade the pieces and pawns
