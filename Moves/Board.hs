@@ -1,10 +1,10 @@
 {-# LANGUAGE TypeSynonymInstances, MultiParamTypeClasses, PatternGuards, BangPatterns #-}
 module Moves.Board (
     posFromFen, initPos,
-    isCheck, inCheck,
+    inCheck,
     goPromo, hasMoves,
     genmv, genmvT,
-    genMoveCapt, genMoveCast, genMoveNCapt, genMoveTransf, genMovePCapt, genMovePNCapt, genMoveFCheck,
+    genMoveCapt, genMoveCast, genMoveNCapt, genMoveTransf, genMoveFCheck,
     genMoveNCaptToCheck,
     updatePos, kingsOk, checkOk,
     legalMove, alternateMoves, nonCapt,
@@ -92,60 +92,6 @@ fenFromString fen = zipWith ($) fenfuncs fentails
           getFenHalf = headOrDefault "-"
           getFenMvNo = headOrDefault "-"
 
-{--
--- find rook-like possibly pinning pieces for a position & color
--- that is: rooks or queens, which possibly pin oponent pieces in regard to the (oponent) king
-findPKAr p c = rAttacs defksq 0 .&. rs .&. atp
-    where (atp, defp) = if c == White then (white p, black p) else (black p, white p)
-          rs = rooks p .|. queens p
-          defksq = firstOne $ defp .&. kings p
-
--- find bishop-like possibly pinning pieces for a position & color
--- that is: bishops or queens, which possibly pin oponent pieces in regard to the (oponent) king
-findPKAb p c = bAttacs defksq 0 .&. bs .&. atp
-    where (atp, defp) = if c == White then (white p, black p) else (black p, white p)
-          bs = bishops p .|. queens p
-          defksq = firstOne $ defp .&. kings p
-
--- find all possibly pining pieces and lines in a given position
--- this has to be calculated per position, and recalculated
--- only when the king or one of the pinning pieces move or is captured
-allPLKAs p = (lwr ++ lwb, lbr ++ lbb)
-    where pkaswr = findPKAr p White
-          pkaswb = findPKAb p White
-          pkasbr = findPKAr p Black
-          pkasbb = findPKAb p Black
-          kwsq = firstOne $ kings p .&. white p
-          kbsq = firstOne $ kings p .&. black p
-          lwr = filter f $ map (findLKA Rook kbsq) $ bbToSquares pkaswr
-          lwb = filter f $ map (findLKA Bishop kbsq) $ bbToSquares pkaswb
-          lbr = filter f $ map (findLKA Rook kwsq) $ bbToSquares pkasbr
-          lbb = filter f $ map (findLKA Bishop kwsq) $ bbToSquares pkasbb
-          f = (/= 0) . snd
---}
-
--- For pinned pieces the move generation is restricted to the pinned line
--- so the same attacs .&. direction
-pinningDir :: MyPos -> Color -> Square -> BBoard
-pinningDir p c sq = let ds = filter (exactOne . (.&. bit sq)) $ map snd
-                                $ if c == White then bpindirs p else wpindirs p
-                    in if null ds then error "pinningDir" else head ds
-
-pinningCapt :: MyPos -> Color -> Square -> BBoard
-pinningCapt p c sq = let ds = filter (exactOne . (.&. bit sq) . snd)
-                                  $ if c == White then bpindirs p else wpindirs p
-                     in if null ds then error "pinningCapt" else bit . fst . head $ ds
-
--- Is color c in check in position p?
-isCheck :: MyPos -> Color -> Bool
-isCheck p c = (ckp /= 0) && (ckp .&. colp /= 0)
-    where colp = if c == White then white p else black p
-          ckp = check p
-
-{-# INLINE inCheck #-}
-inCheck :: MyPos -> Bool
-inCheck = (/= 0) . check
-
 goPromo :: MyPos -> Move -> Bool
 goPromo p m
     | moveIsTransf m = True
@@ -188,7 +134,6 @@ hasMoves !p c
           !anyMove = hasK || hasN || hasPm || hasPc || hasQ || hasR || hasB
           chk = inCheck p
           (!mypc, !yopi) = thePieces p c
-          -- myfpc = mypc `less` pinned p
           myfpc = mypc
           !yopiep = yopi .|. (epcas p .&. epMask)
           legmv x = x `less` mypc
@@ -213,7 +158,6 @@ genMoveCapt !p c = sortByMVVLVA p allp
                      $ firstOne $ kings p .&. myfpc
           allp = concat [ pGenC, nGenC, bGenC, rGenC, qGenC, kGenC ]
           (!mypc, !yopi) = thePieces p c
-          -- myfpc = mypc `less` pinned p
           myfpc = mypc
           -- yopi  = yoPieces p c
           !yopiep = yopi .|. (epcas p .&. epMask)
@@ -240,7 +184,7 @@ genMoveWCapt !p !c = concat [ pGenC, nGenC, bGenC, rGenC, qGenC, kGenC ]
                      $ bbToSquares $ queens p .&. mypc
           kGenC =            srcDests (capt . legal . kAttacs)
                      $ firstOne $ kings p .&. mypc
-          mypc = myPieces p c `less` pinned p
+          mypc = myPieces p c
           yopi  = yoPieces p c
           yopiep = yopi .|. (epcas p .&. epMask)
           capt x = x .&. yopi
@@ -275,7 +219,6 @@ genMoveNCapt !p c = concat [ nGenNC, bGenNC, rGenNC, qGenNC, pGenNC1, pGenNC2, k
                       $ bbToSquares $ queens p .&. mypc
           kGenNC =            srcDests (ncapt . legal . kAttacs)
                       $ firstOne $ kings p .&. mypc
-          -- mypc = myPieces p c `less` pinned p
           mypc = myPieces p c
           ncapt x = x `less` occup p
           legal x = x `less` oppAt
@@ -292,58 +235,10 @@ genMoveTransf !p c = pGenC ++ pGenNC
     --                  $ bbToSquares $ pawns p .&. myfpc .&. traR
           pGenNC = pAll1Moves c (pawns p .&. myfpc) (occup p)
           (!mypc, !yopi) = thePieces p c
-          -- myfpc = mypc .&. traR `less` pinned p
           !myfpc = mypc .&. traR
           !yopiep = yopi .|. (epcas p .&. epMask)
           pcapt x = x .&. yopiep
           !traR = if c == White then 0x00FF000000000000 else 0xFF00
-
--- Generate the captures with pinned pieces
-genMovePCapt :: MyPos -> Color -> [(Square, Square)]
-genMovePCapt !p !c = concat [ pGenC, nGenC, bGenC, rGenC, qGenC ]
-    where pGenC = concatMap (srcDests $ pinCapt p c (pcapt . pAttacs c))
-                     $ bbToSquares $ pawns p .&. myfpc `less` traR
-          nGenC = concatMap (srcDests $ pinCapt p c (capt . nAttacs)) 
-                     $ bbToSquares $ knights p .&. myfpc
-          bGenC = concatMap (srcDests $ pinCapt p c (capt . bAttacs (occup p)))
-                     $ bbToSquares $ bishops p .&. myfpc
-          rGenC = concatMap (srcDests $ pinCapt p c (capt . rAttacs (occup p)))
-                     $ bbToSquares $ rooks p .&. myfpc
-          qGenC = concatMap (srcDests $ pinCapt p c (capt . qAttacs (occup p)))
-                     $ bbToSquares $ queens p .&. myfpc
-          (mypc, yopi) = thePieces p c
-          myfpc = mypc .&. pinned p
-          -- yopi  = yoPieces p c
-          yopiep = yopi .|. (epcas p .&. epMask)
-          capt x = x .&. yopi
-          pcapt x = x .&. yopiep
-          traR = if c == White then 0x00FF000000000000 else 0xFF00
-
--- Generate the non-captures with pinned pieces
-genMovePNCapt :: MyPos -> Color -> [(Square, Square)]
-genMovePNCapt !p !c = concat [ pGenNC, qGenNC, rGenNC, bGenNC, nGenNC ]
-    where pGenNC = concatMap (srcDests $ pinMove p c (ncapt . \s -> pMovs s c (occup p))) 
-                     $ bbToSquares $ pawns p .&. mypc `less` traR
-          nGenNC = concatMap (srcDests $ pinMove p c (ncapt . nAttacs))
-                      $ bbToSquares $ knights p .&. mypc
-          bGenNC = concatMap (srcDests $ pinMove p c (ncapt . bAttacs (occup p)))
-                      $ bbToSquares $ bishops p .&. mypc
-          rGenNC = concatMap (srcDests $ pinMove p c (ncapt . rAttacs (occup p)))
-                      $ bbToSquares $ rooks p .&. mypc
-          qGenNC = concatMap (srcDests $ pinMove p c (ncapt . qAttacs (occup p)))
-                      $ bbToSquares $ queens p .&. mypc
-          mypc = myPieces p c .&. pinned p
-          ncapt x = x `less` occup p
-          traR = if c == White then 0x00FF000000000000 else 0xFF00
-          -- mypawns = pawns p .&. mypc
-
--- {-# INLINE pinMove #-}
-pinMove :: MyPos -> Color -> (Square -> BBoard) -> Square -> BBoard
-pinMove p c f sq = f sq .&. pinningDir p c sq
-
--- {-# INLINE pinCapt #-}
-pinCapt :: MyPos -> Color -> (Square -> BBoard) -> Square -> BBoard
-pinCapt p c f sq = f sq .&. pinningCapt p c sq
 
 -- {-# INLINE srcDests #-}
 srcDests :: (Square -> BBoard) -> Square -> [(Square, Square)]
@@ -370,8 +265,6 @@ findChecking !p !c = concat [ pChk, nChk, bChk, rChk, qbChk, qrChk ]
                                $ bbToSquares $ queens p .&. mypc
           qrChk = map (QueenCheck Rook) $ filter ((/= 0) . kattac . rAttacs (occup p))
                                $ bbToSquares $ queens p .&. mypc
-          -- mypc = myPieces p c
-          -- yopi  = yoPieces p c
           (!mypc, !yopi) = thePieces p c
           kattac x = x .&. kings p .&. yopi
 
@@ -406,13 +299,13 @@ genMoveFCheck !p c
 defendAt :: MyPos -> Color -> BBoard -> [(Square, Square)]
 defendAt p c bb = concat [ nGenC, bGenC, rGenC, qGenC ]
     where nGenC = concatMap (srcDests (target . nAttacs))
-                     $ bbToSquares $ knights p .&. mypc `less` pinned p
+                     $ bbToSquares $ knights p .&. mypc
           bGenC = concatMap (srcDests (target . bAttacs (occup p)))
-                     $ bbToSquares $ bishops p .&. mypc `less` pinned p
+                     $ bbToSquares $ bishops p .&. mypc
           rGenC = concatMap (srcDests (target . rAttacs (occup p)))
-                     $ bbToSquares $ rooks p .&. mypc `less` pinned p
+                     $ bbToSquares $ rooks p .&. mypc
           qGenC = concatMap (srcDests (target . qAttacs (occup p)))
-                     $ bbToSquares $ queens p .&. mypc `less` pinned p
+                     $ bbToSquares $ queens p .&. mypc
           target x = x .&. bb
           mypc = myPieces p c
 
@@ -420,7 +313,7 @@ defendAt p c bb = concat [ nGenC, bGenC, rGenC, qGenC ]
 -- TODO: Here: the promotion is not correct (does not promote!)
 pawnBeatAt :: MyPos -> Color -> BBoard -> [(Square, Square)]
 pawnBeatAt p c bb = concatMap (srcDests (pcapt . pAttacs c))
-                           $ bbToSquares $ pawns p .&. mypc `less` pinned p
+                           $ bbToSquares $ pawns p .&. mypc
     where -- yopi  = yoPieces p c
           yopiep = bb .&. (yopi .|. (epcas p .&. epMask))
           pcapt x = x .&. yopiep
@@ -431,7 +324,7 @@ pawnBeatAt p c bb = concatMap (srcDests (pcapt . pAttacs c))
 -- TODO: Here: the promotion is not correct (does not promote!)
 pawnBlockAt :: MyPos -> Color -> BBoard -> [(Square, Square)]
 pawnBlockAt p c bb = concatMap (srcDests (block . \s -> pMovs s c (occup p))) 
-                            $ bbToSquares $ pawns p .&. mypc `less` pinned p
+                            $ bbToSquares $ pawns p .&. mypc
     where block x = x .&. bb
           mypc = myPieces p c
 
@@ -458,13 +351,13 @@ genMoveNCaptDirCheck :: MyPos -> Color -> [(Square, Square)]
 -- genMoveNCaptDirCheck p c = concat [ nGenC, bGenC, rGenC, qGenC ]
 genMoveNCaptDirCheck p c = concat [ qGenC, rGenC, bGenC, nGenC ]
     where nGenC = concatMap (srcDests (target nTar . nAttacs))
-                     $ bbToSquares $ knights p .&. mypc `less` pinned p
+                     $ bbToSquares $ knights p .&. mypc
           bGenC = concatMap (srcDests (target bTar . bAttacs (occup p)))
-                     $ bbToSquares $ bishops p .&. mypc `less` pinned p
+                     $ bbToSquares $ bishops p .&. mypc
           rGenC = concatMap (srcDests (target rTar . rAttacs (occup p)))
-                     $ bbToSquares $ rooks p .&. mypc `less` pinned p
+                     $ bbToSquares $ rooks p .&. mypc
           qGenC = concatMap (srcDests (target qTar . qAttacs (occup p)))
-                     $ bbToSquares $ queens p .&. mypc `less` pinned p
+                     $ bbToSquares $ queens p .&. mypc
           target b x = x .&. b
           (mypc, yopc) = thePieces p c
           ksq  = firstOne $ yopc .&. kings p
@@ -487,7 +380,8 @@ sortByMVVLVA p = map snd . sortBy (comparing fst) . map va
 
 -- {-# INLINE updatePos #-}
 updatePos :: MyPos -> MyPos
-updatePos = updatePosCheck . updatePosAttacs . updatePosOccup
+-- updatePos = updatePosCheck . updatePosAttacs . updatePosOccup
+updatePos = updatePosAttacs . updatePosOccup
 
 updatePosOccup :: MyPos -> MyPos
 updatePosOccup p = p {
@@ -536,24 +430,14 @@ updatePosAttacs p = p {
           !tblAttacs = tblPAtt .|. tblNAtt .|. tblBAtt .|. tblRAtt .|. tblQAtt .|. tblKAtt
           ocp = occup p
 
+{-
 updatePosCheck :: MyPos -> MyPos
 updatePosCheck p = p {
                   check = tcheck
-                  -- pinned = calcPinned p wpind bpind,
-                  -- wpindirs = wpind, bpindirs = bpind
                }
     where !whcheck = white p .&. kings p .&. blAttacs p
           !blcheck = black p .&. kings p .&. whAttacs p
           !tcheck = blcheck .|. whcheck
-
--- compute the actually pinned pieces based on pining directions and occupancy
--- {-# INLINE calcPinned #-}
-{-
-calcPinned p wpind bpind = wpi .|. bpi
-    where wpi = foldl' (.|.) 0 $ filter ((/= 0) . (.&. white p))
-                    $ filter exactOne $ map ((.&. occup p) . snd) bpind
-          bpi = foldl' (.|.) 0 $ filter ((/= 0) . (.&. black p))
-                    $ filter exactOne $ map ((.&. occup p) . snd) wpind
 -}
 
 -- Generate the castle moves
@@ -578,7 +462,7 @@ genMoveCast p c
 
 -- Set a piece on a square of the table
 setPiece :: Square -> Color -> Piece -> MyPos -> MyPos
-setPiece sq c f p = p { basicPos = nbp, zobkey = nzob, mater = nmat }
+setPiece sq c f p = p { basicPos = nbp, zobkey = nzob, mater = nmat, stage = nsta }
     where setCond cond = if cond then (.|. bsq) else (.&. nbsq)
           nbp = (basicPos p) {
                     bpblack = setCond (c == Black) $ black p,
@@ -588,61 +472,69 @@ setPiece sq c f p = p { basicPos = nbp, zobkey = nzob, mater = nmat }
                 }
           nzob = zobkey p `xor` zold `xor` znew
           nmat = mater p - mold + mnew
-          (!zold, !mold) = case tabla p sq of
-                             Empty      -> (0, 0)
-                             Busy co fo -> (zobPiece co fo sq, matPiece co fo)
+          nsta = stage p - sold + snew
+          (!zold, !mold, !sold) = case tabla p sq of
+                             Empty      -> (0, 0, 0)
+                             Busy co fo -> (zobPiece co fo sq, matPiece co fo, stageValue fo)
           !znew = zobPiece c f sq
           !mnew = matPiece c f
+          !snew = stageValue f
           bsq = 1 `unsafeShiftL` sq
           !nbsq = complement bsq
 
-kingsOk, checkOk :: MyPos -> Bool
+stageValue :: Piece -> Int
+stageValue Knight = 300	-- for the game stage we consider these
+stageValue Bishop = 300	-- simpified values
+stageValue Rook   = 450
+stageValue Queen  = 900
+stageValue _      = 0		-- pawns and kings don't count
+
+inCheck, kingsOk, checkOk :: MyPos -> Bool
+{-# INLINE inCheck #-}
 {-# INLINE kingsOk #-}
 {-# INLINE checkOk #-}
+inCheck p = whincheck /= 0 || blincheck /= 0
+    where !whincheck = white p .&. kings p .&. blAttacs p
+          !blincheck = black p .&. kings p .&. whAttacs p
 kingsOk p = exactOne (kings p .&. white p)
          && exactOne (kings p .&. black p)
 checkOk p = if nextmovewhite then blincheck == 0 else whincheck == 0
     where nextmovewhite = (epcas p .&. mvMask) == 0
-          whincheck = white p .&. kings p .&. blAttacs p
-          blincheck = black p .&. kings p .&. whAttacs p
+          !whincheck = white p .&. kings p .&. blAttacs p
+          !blincheck = black p .&. kings p .&. whAttacs p
 
-data ChangeAccum = CA !ZKey !Int
+data ChangeAccum = CA !ZKey !Int !Int
 
 -- Accumulate a set of changes in MyPos (except BBoards) due to setting a piece on a square
 accumSetPiece :: Square -> Color -> Piece -> MyPos -> ChangeAccum -> ChangeAccum
-accumSetPiece sq c f p (CA z m)
+accumSetPiece sq c f p (CA z m s)
     = case tabla p sq of
-        Empty      -> CA znew mnew
-        Busy co fo -> accumCapt sq co fo znew mnew
+        Empty      -> CA znew mnew snew
+        Busy co fo -> accumCapt sq co fo znew mnew snew
     where !znew = z `xor` zobPiece c f sq
           !mnew = m + matPiece c f
+          !snew = stageValue f
 
 -- Accumulate a set of changes in MyPos (except BBoards) due to clearing a square
 accumClearSq :: Square -> MyPos -> ChangeAccum -> ChangeAccum
-accumClearSq sq p i@(CA z m)
+accumClearSq sq p i@(CA z m s)
     = case tabla p sq of
         Empty      -> i
-        Busy co fo -> accumCapt sq co fo z m
+        Busy co fo -> accumCapt sq co fo z m s
 
-accumCapt :: Square -> Color -> Piece -> ZKey -> Int -> ChangeAccum
-accumCapt sq co fo z m = CA (z `xor` zco) (m - mco)
+accumCapt :: Square -> Color -> Piece -> ZKey -> Int -> Int -> ChangeAccum
+accumCapt sq co fo z m s = CA (z `xor` zco) (m - mco) (s - sco)
     where !zco = zobPiece co fo sq
           !mco = matPiece co fo
+          !sco = stageValue fo
 
 accumMoving :: MyPos -> ChangeAccum -> ChangeAccum
-accumMoving _ (CA z m) = CA (z `xor` zobMove) m
+accumMoving _ (CA z m s) = CA (z `xor` zobMove) m s
 
 -- Take an initial accumulation and a list of functions accum to accum
 -- and compute the final accumulation
 chainAccum :: ChangeAccum -> [ChangeAccum -> ChangeAccum] -> ChangeAccum
 chainAccum = foldl (flip ($))
-
-{-
-changePining :: MyPos -> Square -> Square -> Bool
-changePining p src dst = kings p `testBit` src	-- king is moving
-                      || slide p `testBit` src -- pining piece is moving
-                      || slide p `testBit` dst -- pining piece is captured
--}
 
 {-# INLINE clearCast #-}
 clearCast :: Square -> BBoard -> BBoard
@@ -717,7 +609,7 @@ mvBit !src !dst !w	-- = w `xor` ((w `xor` (shifted .&. nbsrc)) .&. mask)
 -- doFromToMove :: Square -> Square -> MyPos -> Maybe MyPos
 doFromToMove :: Move -> MyPos -> MyPos
 doFromToMove m p | moveIsNormal m = updatePos p {
-                                        basicPos = nbp, zobkey = tzobkey, mater = tmater
+                                        basicPos = nbp, zobkey = tzobkey, mater = tmater, stage = tstage
                                     }
     where nbp = BPos {
               bpblack = tblack, bpslide = tslide, bpkkrq  = tkkrq,  bpdiag  = tdiag,
@@ -739,8 +631,8 @@ doFromToMove m p | moveIsNormal m = updatePos p {
           -- Here: we have to xor with the zobrist keys for casts! Only when rights change!
           tepcas' = clearCast src $ clearCast dst $ epcas p `xor` mvMask	-- to do: ep
           tepcas  = if irevers then reset50Moves tepcas' else addHalfMove tepcas'
-          CA tzobkey tmater = case tabla p src of	-- identify the moving piece
-               Busy col fig -> chainAccum (CA (zobkey p) (mater p)) [
+          CA tzobkey tmater tstage = case tabla p src of	-- identify the moving piece
+               Busy col fig -> chainAccum (CA (zobkey p) (mater p) (stage p)) [
                                    accumClearSq src p,
                                    accumSetPiece dst col fig p,
                                    accumMoving p
@@ -768,14 +660,15 @@ doFromToMove m p | moveIsEnPas m = updatePos p {
           tepcas = reset50Moves $ epcas p `xor` mvMask	-- to do: ep
           Busy col fig  = tabla p src	-- identify the moving piece
           Busy _   Pawn = tabla p del	-- identify the captured piece (pawn)
-          CA tzobkey tmater = chainAccum (CA (zobkey p) (mater p)) [
-                                accumClearSq src p,
-                                accumClearSq del p,
-                                accumSetPiece dst col fig p,
-                                accumMoving p
-                            ]
+          -- Here the stage will not be changes
+          CA tzobkey tmater _      = chainAccum (CA (zobkey p) (mater p) (stage p)) [
+                                         accumClearSq src p,
+                                         accumClearSq del p,
+                                         accumSetPiece dst col fig p,
+                                         accumMoving p
+                                     ]
 doFromToMove m p | moveIsTransf m = updatePos p0 {
-                                        basicPos = nbp, zobkey = tzobkey, mater = tmater
+                                        basicPos = nbp, zobkey = tzobkey, mater = tmater, stage = tstage
                                     }
     where nbp = BPos {
               bpblack = tblack, bpslide = tslide, bpkkrq = tkkrq, bpdiag = tdiag,
@@ -791,11 +684,11 @@ doFromToMove m p | moveIsTransf m = updatePos p0 {
           tkkrq  = mvBit src dst $ kkrq p0
           tdiag  = mvBit src dst $ diag p0
           tepcas = reset50Moves $ epcas p `xor` mvMask	-- to do: ep
-          CA tzobkey tmater = chainAccum (CA (zobkey p0) (mater p0)) [
-                                accumClearSq src p0,
-                                accumSetPiece dst col pie p0,
-                                accumMoving p0
-                            ]
+          CA tzobkey tmater tstage = chainAccum (CA (zobkey p0) (mater p0) (stage p0)) [
+                                         accumClearSq src p0,
+                                         accumSetPiece dst col pie p0,
+                                         accumMoving p0
+                                     ]
 doFromToMove m p | moveIsCastle m = updatePos p {
                                         basicPos = nbp, zobkey = tzobkey, mater = tmater
                                     }
@@ -823,20 +716,21 @@ doFromToMove m p | moveIsCastle m = updatePos p {
           tepcas = reset50Moves $ clearCast src $ epcas p `xor` mvMask	-- to do: ep
           Busy col King = tabla p src	-- identify the moving piece (king)
           Busy co1 Rook = tabla p csr	-- identify the moving rook
-          CA tzobkey tmater = chainAccum (CA (zobkey p) (mater p)) [
-                                accumClearSq src p,
-                                accumSetPiece dst col King p,
-                                accumClearSq csr p,
-                                accumSetPiece cds co1 Rook p,
-                                accumMoving p
-                            ]
+          -- Here the stage will not be changed
+          CA tzobkey tmater _      = chainAccum (CA (zobkey p) (mater p) (stage p)) [
+                                         accumClearSq src p,
+                                         accumSetPiece dst col King p,
+                                         accumClearSq csr p,
+                                         accumSetPiece cds co1 Rook p,
+                                         accumMoving p
+                                     ]
 doFromToMove _ _ = error "doFromToMove: wrong move type"
 
 reverseMoving :: MyPos -> MyPos
 reverseMoving p = p { basicPos = nbp, zobkey = z }
     where nbp = (basicPos p) { bpepcas = tepcas }
           tepcas = epcas p `xor` mvMask
-          CA z _ = chainAccum (CA (zobkey p) (mater p)) [
-                       accumMoving p
-                   ]
+          CA z _ _ = chainAccum (CA (zobkey p) (mater p) (stage p)) [
+                         accumMoving p
+                     ]
 -- Here is not clear what to do with castle and en passant...

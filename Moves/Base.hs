@@ -122,7 +122,7 @@ genMoves depth absdp pv = do
     --     lift $ ctxLog "Debug" $ "--> genMoves:\n" ++ showTab (black p) (slide p) (kkrq p) (diag p)
     let !c = moving p
         lc = map (genmv True p) $ genMoveFCheck p c
-    if isCheck p c
+    if inCheck p	-- only the moving color can be in check - checked by precedent doMove
        then return (lc, [])
        else do
             let l0 = genMoveCast p c
@@ -160,7 +160,7 @@ genTactMoves = do
         lc = map (genmv True p) $ genMoveFCheck p c
         -- the non capturing check moves have to be at the end (tested!)
         -- else if onlyWinningCapts then l1 ++ l2w ++ lnc else l1 ++ l2 ++ lnc
-        !mvs | isCheck p c      = lc
+        !mvs | inCheck p        = lc
              | onlyWinningCapts = l1 ++ l2w
              | otherwise        = l1 ++ l2
     return mvs
@@ -209,7 +209,7 @@ doMove real m qs = do
         kc = case tabla pc (toSquare m1) of
                  Busy _ King -> True
                  _           -> False
-        p' = doFromToMove m1 pc { realMove = real }
+        p' = doFromToMove m1 pc 	-- { realMove = real }
         kok = kingsOk p'
         cok = checkOk p'
     -- If the move is real and one of those conditions occur,
@@ -230,7 +230,8 @@ doMove real m qs = do
                         (!sts, feats) = if real
                                            then (0, [])
                                            else evalState (posEval p' c) (evalst s)
-                        !p = p' { staticScore = sts, staticFeats = feats }
+                        -- !p = p' { staticScore = sts, staticFeats = feats }
+                        !p = p' { staticScore = sts }
                         dext = if inCheck p || goPromo p m1 then 1 else 0
                     -- when debug $
                     --     lift $ ctxLog "Debug" $ "*** doMove: " ++ showMyPos p
@@ -250,7 +251,8 @@ doNullMove = do
         !p' = reverseMoving p0
         !c = moving p'
         (!sts, feats) = evalState (posEval p' c) (evalst s)
-        !p = p' { staticScore = sts, staticFeats = feats }
+        -- !p = p' { staticScore = sts, staticFeats = feats }
+        !p = p' { staticScore = sts }
     put s { stack = p : stack s }
 
 checkRemisRules :: CtxMon m => MyPos -> Game r m Bool
@@ -288,7 +290,7 @@ undoMove = do
 tacticalPos :: CtxMon m => Game r m Bool
 tacticalPos = do
     t <- getPos
-    return $! check t /= 0
+    return $! inCheck t
 
 {-# INLINE isMoveLegal #-}
 isMoveLegal :: CtxMon m => Move -> Game r m Bool
@@ -321,7 +323,7 @@ staticVal0 = do
         -- Here we actually don't need genMoves - it would be enough to know that
         -- there is at least one legal move, which should be much cheaper
         stSc1 | hasMoves t c  = stSc
-              | check t /= 0  = -mateScore
+              | inCheck t     = -mateScore
               | otherwise     = 0
     -- when debug $ lift $ ctxLog "Debug" $ "--> staticVal0 " ++ show stSc1
     return $! stSc1

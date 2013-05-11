@@ -18,28 +18,13 @@ import Struct.Status
 import Moves.Moves
 import Moves.BitBoard
 import Moves.Muster
--- import Eval.Gradient
 import Eval.BasicEval
-
--- Criteria (x2, once for every player):
--- + number of every piece (except king) (5 times)
--- + king safety 1st zone: opponents attacs & own defends (own & opponent's king)
--- * king safety 2nd zone: opponents attacs & own defends (own & opponent's king)
--- + king openness (attacs of a rook or bishop from the kings square) if the opponent has rook, bishop or queen
--- + attacs count
--- + attacs count in the center
--- + attacs count in the opponents fields
--- * pass pawns
--- * semifree pawns
--- * minimum squares to transform when pass
--- * minimum squares to transform when semi pass
--- * sum of squares to transform (all pawns)
--- * number of pawn groups
--- * number of undefended pieces
 
 type IParams = [Int]
 type DParams = [Double]
 type Limits = [(Double, Double)]
+
+data EvalFoundation = EvalFoundation
 
 class EvalItem a where
     evalItem    :: MyPos -> Color -> a -> IParams
@@ -64,8 +49,8 @@ data AnyEvalItem = forall a . EvalItem a => EvIt a
 evalItems :: [AnyEvalItem]
 evalItems = [ EvIt Material,	-- material balance (i.e. white - black material
               -- EvIt EnPrise,	-- when not quiescent - pieces en prise
-              EvIt Redundance,	-- bishop pair and rook redundance
-              EvIt NRCorrection,	-- material correction for knights & rooks
+              -- EvIt Redundance,	-- bishop pair and rook redundance
+              -- EvIt NRCorrection,	-- material correction for knights & rooks
               EvIt RookPawn,	-- the rook pawns are about 15% less valuable
               EvIt KingSafe,	-- king safety
               EvIt KingOpen,	-- malus for king openness
@@ -325,8 +310,32 @@ instance EvalItem Material where
     evalItem p c _ = materDiff p c
     evalItemNDL _ = [("materialDiff", (8, (8, 8)))]
 
+-- We will not count the material incremental, as with the change of values based on stage and
+-- position openness this is not feasible anymore
 materDiff :: MyPos -> Color -> IParams
-materDiff p _ = [mater p]
+materDiff p _ = [md]
+    where !md = mw - mb
+          !wp = popCount1 $ pawns p .&. white p
+          !bp = popCount1 $ pawns p .&. black p
+          !wn = popCount1 $ knights p .&. white p
+          !bn = popCount1 $ knights p .&. black p
+          !wb = popCount1 $ bishops p .&. white p
+          !bb = popCount1 $ bishops p .&. black p
+          !wr = popCount1 $ rooks p .&. white p
+          !br = popCount1 $ rooks p .&. black p
+          !wq = popCount1 $ queens p .&. white p
+          !bq = popCount1 $ queens p .&. black p
+          !grd = wp + bp
+          !mw = wp * gradedMatVal Pawn (stage p)
+              + wn * gradedMatVal Knight grd
+              + wb * gradedMatVal Bishop grd
+              + wr * gradedMatVal Rook   grd
+              + wq * gradedMatVal Queen  grd
+          !mb = bp * gradedMatVal Pawn (stage p)
+              + bn * gradedMatVal Knight grd
+              + bb * gradedMatVal Bishop grd
+              + br * gradedMatVal Rook   grd
+              + bq * gradedMatVal Queen  grd
 
 ------ King openness ------
 data KingOpen = KingOpen
