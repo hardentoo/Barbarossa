@@ -6,7 +6,6 @@ module Eval.BasicEval (
 import Data.Array.Unboxed
 import Data.Array.Base
 import GHC.Arr (unsafeIndex)
-import Data.Bits (unsafeShiftR)
 
 import Struct.Struct
 
@@ -32,12 +31,11 @@ gradedMatVal Bishop !i = unsafeAt bishopGrades i
 gradedMatVal Knight !i = unsafeAt knightGrades i
 -- Tricky here: we know is must be in centipawns, but calculate in 8th of that
 -- to be more precise. The pawn value is included in the function! (Now 100)
-gradedMatVal Pawn   !s = case v > 115 of
-                             True -> 115
-                             _    -> case v < 100 of
-                                         True -> 100
-                                         _    -> v
-    where !v = (24500 - s) `div` 200
+gradedMatVal Pawn   !s
+    | v > 115 = 115
+    | v < 100 = 100
+    | otherwise = v
+    where v = (24500 - s) `div` 200
 
 queenGrades, rookGrades, bishopGrades, knightGrades :: UArray Int Int
 -- These arrays are used to grade the pieces and pawns

@@ -50,7 +50,7 @@ data AnyEvalItem = forall a . EvalItem a => EvIt a
 -- places too, so it is picked up from the fist place
 evalItems :: [AnyEvalItem]
 evalItems = [ EvIt Material,	-- material balance (i.e. white - black material)
-              -- EvIt EnPrise,	-- when not quiescent - pieces en prise
+              EvIt EnPrise,	-- when not quiescent - pieces en prise
               EvIt Redundance,	-- bishop pair and rook redundance
               -- EvIt NRCorrection,	-- material correction for knights & rooks
               EvIt RookPawn,	-- the rook pawns are about 15% less valuable
@@ -59,7 +59,7 @@ evalItems = [ EvIt Material,	-- material balance (i.e. white - black material)
               EvIt KingCenter,	-- malus for king on center files
               -- EvIt KingMob,	-- bonus for restricted mobility of adverse king when alone
               -- EvIt Castles,	-- bonus for castle rights
-              EvIt LastLine,	-- malus for pieces on last line (except rooks and king)
+              -- EvIt LastLine,	-- malus for pieces on last line (except rooks and king)
               EvIt Mobility,	-- pieces mobility
               EvIt Center,	-- attacs of center squares
               -- EvIt DblPawns,	-- malus for doubled pawns
@@ -187,7 +187,6 @@ evalNoPawns p c sti = (sc, zeroFeats)
               | kbbk        = mateKBBK p kaloneb	-- 2 bishops
               | kbnk        = mateKBNK p kaloneb	-- bishop + knight
               | kMxk        = mateKMajxK p kaloneb	-- simple mate with at least one major
-              -- | kqkx        = mateQRest p kaloneb	-- queen against minor or rook
               | otherwise   = fst $ normalEval p c sti
           kalonew = white p `less` kings p == 0
           kaloneb = black p `less` kings p == 0
@@ -206,8 +205,9 @@ winBonus :: Int
 winBonus = 200	-- when it's known win
 
 mateKBBK :: MyPos -> Bool -> Int
-mateKBBK p wwin = materDiff p White + if wwin then sc else -sc	-- color is not needed
-    where kadv = if wwin then kb else kw
+mateKBBK p wwin = v
+    where !v = materDiff p White + if wwin then sc else -sc	-- color is not needed
+          kadv = if wwin then kb else kw
           kw = kingSquare (kings p) (white p)
           kb = kingSquare (kings p) (black p)
           distk = squareDistance kw kb
@@ -215,8 +215,9 @@ mateKBBK p wwin = materDiff p White + if wwin then sc else -sc	-- color is not n
           sc = winBonus + distc*distc - distk*distk
 
 mateKBNK :: MyPos -> Bool -> Int
-mateKBNK p wwin = materDiff p White + if wwin then sc else -sc	-- color is not needed
-    where kadv = if wwin then kb else kw
+mateKBNK p wwin = v
+    where !v = materDiff p White + if wwin then sc else -sc	-- color is not needed
+          kadv = if wwin then kb else kw
           kw = kingSquare (kings p) (white p)
           kb = kingSquare (kings p) (black p)
           distk = squareDistance kw kb
@@ -225,8 +226,9 @@ mateKBNK p wwin = materDiff p White + if wwin then sc else -sc	-- color is not n
           sc = winBonus + distc*distc - distk*distk
 
 mateKMajxK :: MyPos -> Bool -> Int
-mateKMajxK p wwin = materDiff p White + if wwin then sc else -sc	-- color is not needed
-    where kadv = if wwin then kb else kw
+mateKMajxK p wwin = v
+    where !v = materDiff p White + if wwin then sc else -sc	-- color is not needed
+          kadv = if wwin then kb else kw
           kw = kingSquare (kings p) (white p)
           kb = kingSquare (kings p) (black p)
           distk = squareDistance kw kb
@@ -257,6 +259,20 @@ zoneAttacs :: MyPos -> BBoard -> (Int, Int)
 zoneAttacs p zone = (wh, bl)
     where wh = popCount $ zone .&. whAttacs p
           bl = popCount $ zone .&. blAttacs p
+
+-- In order to consider the game stage, we need to interpolate
+-- between some beginning value and some ending value
+-- We solve this generically by the following modell:
+-- The interpolation is linear, but with limits
+-- We define an x domain between xmin and xmax, where the value is linear
+-- but under xmin and over xmax the values are fixed: ymin and ymax 
+stageInterp :: (Int, Int) -> (Int, Int) -> Int -> Int
+stageInterp (xmin, ymin) (xmax, ymax) x
+    | x <= xmin = ymin
+    | x >= xmax = ymax
+    | otherwise = ymin + ydiff * (x - xmin) `div` xdiff
+    where ydiff = ymax - ymin
+          xdiff = xmax - xmin
 
 ----------------------------------------------------------------------------
 -- Here we have the implementation of the evaluation items
@@ -397,24 +413,27 @@ data Mobility = Mobility	-- "safe" moves
 
 instance EvalItem Mobility where
     evalItem p c _ = mobDiff p c
-    evalItemNDL _ = [ ("mobilityKnight", (72, (60, 100))),
+    evalItemNDL _ = [ ("mobilityPawn", (56, (10, 100))),
+                      ("mobilityKnight", (72, (60, 100))),
                       ("mobilityBishop", (72, (60, 100))),
                       ("mobilityRook", (48, (40, 100))),
                       ("mobilityQueen", (3, (0, 50))) ]
 
--- Here we do not calculate pawn mobility (which, calculated as attacs, is useless)
+-- Here we calculate pawn mobility only for attacs attacs, it should be the rest also!
 mobDiff :: MyPos -> Color -> IParams
 mobDiff p _ = [n, b, r, q]
     where !whN = popCount1 $ whNAttacs p `less` (white p .|. blPAttacs p)
           !whB = popCount1 $ whBAttacs p `less` (white p .|. blPAttacs p)
           !whR = popCount1 $ whRAttacs p `less` (white p .|. blA1)
           !whQ = popCount1 $ whQAttacs p `less` (white p .|. blA2)
+          !whP = popCount1 $ whPAttacs p
           !blA1 = blPAttacs p .|. blNAttacs p .|. blBAttacs p
           !blA2 = blA1 .|. blRAttacs p
           !blN = popCount1 $ blNAttacs p `less` (black p .|. whPAttacs p)
           !blB = popCount1 $ blBAttacs p `less` (black p .|. whPAttacs p)
           !blR = popCount1 $ blRAttacs p `less` (black p .|. whA1)
           !blQ = popCount1 $ blQAttacs p `less` (black p .|. whA2)
+          !blP = popCount1 $ blPAttacs p
           !whA1 = whPAttacs p .|. whNAttacs p .|. whBAttacs p
           !whA2 = whA1 .|. whRAttacs p
           !n = whN - blN
@@ -427,38 +446,60 @@ data Center = Center
 
 instance EvalItem Center where
     evalItem p c _ = centerDiff p c
-    evalItemNDL _ = [("centerAttacs", (72, (50, 100)))]
+    evalItemNDL _ = [("centerAttacs", (8, (0, 8)))]
 
 centerDiff :: MyPos -> Color -> IParams
 centerDiff p _ = [wb]
-    where (w, b) = zoneAttacs p center
-          !wb = w - b
-          -- center = 0x0000001818000000
-          center = 0x0000003C3C000000
+    where !wb = interp (w - b) (stage p)
+          ring0 = 0x0000001818000000
+          ring1 = 0x00003C24243C0000
+          pr0 = pawns p .&. ring0
+          mr0 = (knights p .|. bishops p) .&. ring0
+          jr0 = (rooks p .|. queens p) .&. ring0
+          wpr0 = popCount1 $! pr0 .&. white p
+          bpr0 = popCount1 $! pr0 .&. black p
+          wmr0 = popCount1 $! mr0 .&. white p
+          bmr0 = popCount1 $! mr0 .&. black p
+          wjr0 = popCount1 $! jr0 .&. white p
+          bjr0 = popCount1 $! jr0 .&. black p
+          wpcr0 = popCount1 $! whPAttacs p .&. ring0	-- attacs in ring 0
+          bpcr0 = popCount1 $! blPAttacs p .&. ring0
+          wfcr0 = popCount1 $! ring0 .&. (whNAttacs p .|. whBAttacs p .|. whRAttacs p .|. whQAttacs p)
+          bfcr0 = popCount1 $! ring0 .&. (blNAttacs p .|. blBAttacs p .|. blRAttacs p .|. blQAttacs p)
+          wr1 = popCount1 $! ring1 .&. (white p `less` kings p)	-- all in ring 1
+          br1 = popCount1 $! ring1 .&. (black p `less` kings p)
+          w = 40 * wpr0 + 20 * wmr0 + 30 * wjr0 + 10 * wpcr0 + 10 * wfcr0 + 10 * wr1
+          b = 40 * bpr0 + 20 * bmr0 + 30 * bjr0 + 10 * bpcr0 + 10 * bfcr0 + 10 * br1
+          interp x v = v * stageInterp (1500, 0) (6000, 100) x `div` 100
 
 ------ En prise ------
---data EnPrise = EnPrise
---
---instance EvalItem EnPrise where
---    evalItem p c _ = enPrise p c
---    evalItemNDL _  = [("enPriseFrac", (10, (0, 100)))]
+data EnPrise = EnPrise
 
--- Here we could also take care who is moving and even if it's check - now we don't
---enPrise :: MyPos -> Color -> IParams
---enPrise p _ = [epp]
---    where !ko = popCount1 $ white p .&. knights p .&. blAttacs p
---          !ka = popCount1 $ black p .&. knights p .&. whAttacs p
---          !bo = popCount1 $ white p .&. bishops p .&. blAttacs p
---          !ba = popCount1 $ black p .&. bishops p .&. whAttacs p
---          !ro = popCount1 $ white p .&. rooks p .&. blAttacs p
---          !ra = popCount1 $ black p .&. rooks p .&. whAttacs p
---          !qo = popCount1 $ white p .&. queens p .&. blAttacs p
---          !qa = popCount1 $ black p .&. queens p .&. whAttacs p
---          !k = (ka - ko) * matPiece White Knight
---          !b = (ba - bo) * matPiece White Bishop
---          !r = (ra - ro) * matPiece White Rook
---          !q = (qa - qo) * matPiece White Queen
---          !epp = (k + b + r + q) `div` 100
+instance EvalItem EnPrise where
+    evalItem p c _ = enPrise p c
+    evalItemNDL _  = [("enPriseFrac", (1, (0, 1)))]
+
+-- We want to calculate fix 10% of the attacked piece and take care that the parameter above
+-- is 1, so we must express the bonus in 800 units per pawn
+-- The computation then should be: material attacked in cp divided by 10 and multiplied by 8
+-- But to simplify the computation we let the difference as it is, resulting in a final
+-- percentage of 12,5% of the attacked value
+-- But that 12,5% seems too much, we take 1/2 of it, which means ~6%
+enPrise :: MyPos -> Color -> IParams
+enPrise p _ = [epp]
+    where !ko = popCount1 $ white p .&. knights p .&. blAttacs p
+          !ka = popCount1 $ black p .&. knights p .&. whAttacs p
+          !bo = popCount1 $ white p .&. bishops p .&. blAttacs p
+          !ba = popCount1 $ black p .&. bishops p .&. whAttacs p
+          !ro = popCount1 $ white p .&. rooks p .&. blAttacs p
+          !ra = popCount1 $ black p .&. rooks p .&. whAttacs p
+          !qo = popCount1 $ white p .&. queens p .&. blAttacs p
+          !qa = popCount1 $ black p .&. queens p .&. whAttacs p
+          !k = (ka - ko) * matPiece White Knight
+          !b = (ba - bo) * matPiece White Bishop
+          !r = (ra - ro) * matPiece White Rook
+          !q = (qa - qo) * matPiece White Queen
+          !epp = (k + b + r + q) `unsafeShiftR` 1
 
 ------ Castle rights ------
 --data Castles = Castles
