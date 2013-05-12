@@ -51,6 +51,7 @@ data AnyEvalItem = forall a . EvalItem a => EvIt a
 evalItems :: [AnyEvalItem]
 evalItems = [ EvIt Material,	-- material balance (i.e. white - black material)
               EvIt EnPrise,	-- when not quiescent - pieces en prise
+              EvIt Defend,	-- defended and undefended pieces
               EvIt Redundance,	-- bishop pair and rook redundance
               -- EvIt NRCorrection,	-- material correction for knights & rooks
               EvIt RookPawn,	-- the rook pawns are about 15% less valuable
@@ -402,11 +403,12 @@ kingCenter p _ = [ kcd ]
     where kcenter = fileC .|. fileD .|. fileE .|. fileF
           !wkc = if kings p .&. white p .&. kcenter /= 0 then brooks + 2 * bqueens - 1 else 0
           !bkc = if kings p .&. black p .&. kcenter /= 0 then wrooks + 2 * wqueens - 1 else 0
-          !kcd = wkc - bkc
+          !kcd = interp (stage p) (wkc - bkc)
           wrooks  = popCount1 $ rooks p .&. white p
           wqueens = popCount1 $ queens p .&. white p
           brooks  = popCount1 $ rooks p .&. black p
           bqueens = popCount1 $ queens p .&. black p
+          interp !x !v = v * stageInterp (1500, 0) (6000, 100) x `div` 100
 
 ------ Mobility ------
 data Mobility = Mobility	-- "safe" moves
@@ -450,7 +452,7 @@ instance EvalItem Center where
 
 centerDiff :: MyPos -> Color -> IParams
 centerDiff p _ = [wb]
-    where !wb = interp (w - b) (stage p)
+    where !wb = interp (stage p) (w - b)
           ring0 = 0x0000001818000000
           ring1 = 0x00003C24243C0000
           pr0 = pawns p .&. ring0
@@ -470,7 +472,7 @@ centerDiff p _ = [wb]
           br1 = popCount1 $! ring1 .&. (black p `less` kings p)
           w = 40 * wpr0 + 20 * wmr0 + 30 * wjr0 + 10 * wpcr0 + 10 * wfcr0 + 10 * wr1
           b = 40 * bpr0 + 20 * bmr0 + 30 * bjr0 + 10 * bpcr0 + 10 * bfcr0 + 10 * br1
-          interp x v = v * stageInterp (1500, 0) (6000, 100) x `div` 100
+          interp !x !v = v * stageInterp (1500, 0) (6000, 100) x `div` 100
 
 ------ En prise ------
 data EnPrise = EnPrise
@@ -495,11 +497,59 @@ enPrise p _ = [epp]
           !ra = popCount1 $ black p .&. rooks p .&. whAttacs p
           !qo = popCount1 $ white p .&. queens p .&. blAttacs p
           !qa = popCount1 $ black p .&. queens p .&. whAttacs p
+          !po = popCount1 $ white p .&. pawns p .&. blAttacs p
+          !pa = popCount1 $ black p .&. pawns p .&. whAttacs p
           !k = (ka - ko) * matPiece White Knight
           !b = (ba - bo) * matPiece White Bishop
           !r = (ra - ro) * matPiece White Rook
           !q = (qa - qo) * matPiece White Queen
-          !epp = (k + b + r + q) `unsafeShiftR` 1
+          !a = (pa - po) * matPiece White Pawn
+          !epp = (k + b + r + q + a) `unsafeShiftR` 1
+
+------ Defended and undefended pieces ------
+data Defend = Defend
+
+instance EvalItem Defend where
+    evalItem p c _ = defended p
+    evalItemNDL _  = [("defendFrac", (1, (0, 1))),
+                      ("undefendFrac", (8, (0, 8)))]
+
+-- Same logic for defended as enPrise, but we take 1/4 of the value (half as for attacking)
+-- Here the recommended percentage is 5%, we have about 3%
+defended :: MyPos -> IParams
+defended p = [ def, undef ]
+    where !undef = bundef - wundef	-- negate, it is a penalty!
+          !ko = popCount1 $ white p .&. knights p .&. whAttacs p
+          !ka = popCount1 $ black p .&. knights p .&. blAttacs p
+          !bo = popCount1 $ white p .&. bishops p .&. whAttacs p
+          !ba = popCount1 $ black p .&. bishops p .&. blAttacs p
+          !ro = popCount1 $ white p .&. rooks p .&. whAttacs p
+          !ra = popCount1 $ black p .&. rooks p .&. blAttacs p
+          !qo = popCount1 $ white p .&. queens p .&. whAttacs p
+          !qa = popCount1 $ black p .&. queens p .&. blAttacs p
+          !po = popCount1 $ white p .&. pawns p .&. whAttacs p
+          !pa = popCount1 $ black p .&. pawns p .&. blAttacs p
+          !k = (ka - ko) * matPiece White Knight
+          !b = (ba - bo) * matPiece White Bishop
+          !r = (ra - ro) * matPiece White Rook
+          !q = (qa - qo) * matPiece White Queen
+          !a = (pa - po) * matPiece White Pawn
+          !def = (k + b + r + q + a) `unsafeShiftR` 2
+          !kop = kings p .|. pawns p
+          !wu = popCount1 $ (white p `less` kop) `less` whAttacs p
+          !bu = popCount1 $ (black p `less` kop) `less` blAttacs p
+          !wus | wu == 0 = 0
+               | wu == 1 = 5
+               | otherwise = 7 * wu
+          !bus | bu == 0 = 0
+               | bu == 1 = 5
+               | otherwise = 7 * bu
+          !wup = popCount1 $ (white p .&. pawns p) `less` whAttacs p
+          !bup = popCount1 $ (black p .&. pawns p) `less` blAttacs p
+          !wups = wup * 5	-- this is 4 mp
+          !bups = bup * 5
+          !wundef = wus + wups
+          !bundef = bus + bups
 
 ------ Castle rights ------
 --data Castles = Castles
