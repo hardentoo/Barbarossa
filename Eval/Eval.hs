@@ -424,9 +424,9 @@ instance EvalItem Mobility where
                       ("mobilityRook", (48, (40, 100))),
                       ("mobilityQueen", (3, (0, 50))) ]
 
--- Here we calculate pawn mobility only for attacs attacs, it should be the rest also!
+-- Here we calculate pawn mobility only for attacs, it should be the rest also!
 mobDiff :: MyPos -> Color -> IParams
-mobDiff p _ = [n, b, r, q]
+mobDiff p _ = [a, n, b, r, q]
     where !whN = popCount1 $ whNAttacs p `less` (white p .|. blPAttacs p)
           !whB = popCount1 $ whBAttacs p `less` (white p .|. blPAttacs p)
           !whR = popCount1 $ whRAttacs p `less` (white p .|. blA1)
@@ -441,6 +441,7 @@ mobDiff p _ = [n, b, r, q]
           !blP = popCount1 $ blPAttacs p
           !whA1 = whPAttacs p .|. whNAttacs p .|. whBAttacs p
           !whA2 = whA1 .|. whRAttacs p
+          !a = whP - blP
           !n = whN - blN
           !b = whB - blB
           !r = whR - blR
@@ -532,11 +533,11 @@ defended p = [ def, undef ]
           !qa = popCount1 $ black p .&. queens p .&. blAttacs p
           !po = popCount1 $ white p .&. pawns p .&. whAttacs p
           !pa = popCount1 $ black p .&. pawns p .&. blAttacs p
-          !k = (ka - ko) * matPiece White Knight
-          !b = (ba - bo) * matPiece White Bishop
-          !r = (ra - ro) * matPiece White Rook
-          !q = (qa - qo) * matPiece White Queen
-          !a = (pa - po) * matPiece White Pawn
+          !k = (ko - ka) * matPiece White Knight
+          !b = (bo - ba) * matPiece White Bishop
+          !r = (ro - ra) * matPiece White Rook
+          !q = (qo - qa) * matPiece White Queen
+          !a = (po - pa) * matPiece White Pawn
           !def = (k + b + r + q + a) `unsafeShiftR` 2
           !kop = kings p .|. pawns p
           !wu = popCount1 $ (white p `less` kop) `less` whAttacs p
