@@ -4,7 +4,7 @@ module Moves.Moves (
     fAttacs,
     pMovs,
     kAttacs, qAttacs, rAttacs, bAttacs, nAttacs,
-    pAll1Moves, pAll2Moves
+    pAll1Moves, pAll2Moves, pAll1MovesCount, pAll2MovesCount
     ) where
 
 import Data.Array.Base
@@ -132,14 +132,26 @@ pAll1Moves Black !pawns !occup = map f $ bbToSquares $ (pawns `unsafeShiftR` 8) 
     where f !x = (x + 8, x)
 
 pAll2Moves :: Color -> BBoard -> BBoard -> [(Square, Square)]
-pAll2Moves White pawns occup = map f $ bbToSquares $ (pawns2 `unsafeShiftL` 16) `less` occ2
+pAll2Moves White !pawns !occup = map f $ bbToSquares $ (pawns2 `unsafeShiftL` 16) `less` occ2
     where pawns2 = pawns .&. 0x000000000000FF00
           occ2 = occup .|. (occup `unsafeShiftL` 8)
           f !x = (x - 16, x)
-pAll2Moves Black pawns occup = map f $ bbToSquares $ (pawns2 `unsafeShiftR` 16) `less` occ2
+pAll2Moves Black !pawns !occup = map f $ bbToSquares $ (pawns2 `unsafeShiftR` 16) `less` occ2
     where pawns2 = pawns .&. 0x00FF000000000000
           occ2 = occup .|. (occup `unsafeShiftR` 8)
           f !x = (x + 16, x)
+
+pAll1MovesCount :: Color -> BBoard -> BBoard -> Int
+pAll1MovesCount White !pawns !occup = popCount1 $ (pawns `unsafeShiftL` 8) `less` occup
+pAll1MovesCount Black !pawns !occup = popCount1 $ (pawns `unsafeShiftR` 8) `less` occup
+
+pAll2MovesCount :: Color -> BBoard -> BBoard -> Int
+pAll2MovesCount White !pawns !occup = popCount1 $ (pawns2 `unsafeShiftL` 16) `less` occ2
+    where pawns2 = pawns .&. 0x000000000000FF00
+          occ2 = occup .|. (occup `unsafeShiftL` 8)
+pAll2MovesCount Black !pawns !occup = popCount1 $ (pawns2 `unsafeShiftR` 16) `less` occ2
+    where pawns2 = pawns .&. 0x00FF000000000000
+          occ2 = occup .|. (occup `unsafeShiftR` 8)
 
 {-# INLINE fAttacs #-}
 fAttacs :: Square -> Piece -> BBoard -> BBoard  -- piece attacs except pawn

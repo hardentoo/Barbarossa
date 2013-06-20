@@ -7,6 +7,10 @@ module Eval.Eval (
     paramNames, parLims, parDim, paramPairs
 ) where
 
+-- This branch has the evaluation function mostly inspired by the paper
+-- Little Chess Evaluation Compendium by Tsevtkov
+-- Most of the features from that paper are not yet implemented, this is a work in progress...
+
 import Data.Array.Base (unsafeAt)
 import Data.Bits hiding (popCount)
 import Data.List
@@ -53,14 +57,11 @@ evalItems = [ EvIt Material,	-- material balance (i.e. white - black material)
               EvIt EnPrise,	-- when not quiescent - pieces en prise
               EvIt Defend,	-- defended and undefended pieces
               EvIt Redundance,	-- bishop pair and rook redundance
-              -- EvIt NRCorrection,	-- material correction for knights & rooks
               EvIt RookPawn,	-- the rook pawns are about 15% less valuable
               EvIt KingSafe,	-- king safety
               EvIt KingOpen,	-- malus for king openness
-              EvIt KingCenter,	-- malus for king on center files
-              -- EvIt KingMob,	-- bonus for restricted mobility of adverse king when alone
-              -- EvIt Castles,	-- bonus for castle rights
-              -- EvIt LastLine,	-- malus for pieces on last line (except rooks and king)
+              -- EvIt KingCenter,	-- malus for king on center files
+              EvIt KingPlace,	-- bonus for king on some places (and malus for other)
               EvIt Mobility,	-- pieces mobility
               EvIt Center,	-- attacs of center squares
               -- EvIt DblPawns,	-- malus for doubled pawns
@@ -413,39 +414,134 @@ kingCenter p _ = [ kcd ]
           bqueens = popCount1 $ queens p .&. black p
           interp !x !v = v * stageInterp (1500, 0) (6000, 100) x `div` 100
 
+-- King placement
+data KingPlace = KingPlace
+
+instance EvalItem KingPlace where
+    evalItem p c _ = kingPlace p
+    evalItemNDL _  = [("kingPlace", (4, (0, 5)))]	-- value is 100x, see kingPlace
+
+kingPlace :: MyPos -> IParams
+kingPlace p = [ kp ]
+    where msq = kingSquare (kings p) $ white p
+          ysq = kingSquare (kings p) $ black p
+          wkp = whiteKingPos `unsafeAt` msq
+          bkp = blackKingPos `unsafeAt` ysq
+          kp = interp (stage p) $ (wkp - bkp) * 100	-- because small values
+          interp !x !v = v * stageInterp (1000, 0) (3000, 100) x `div` 100
+
+whiteKingPos, blackKingPos :: UArray Square Int
+whiteKingPos = array (0, 63) [(sq, kingPlaceBonus sq) | sq <- [0 .. 63]]
+blackKingPos = array (0, 63) [(sq, kingPlaceBonus $ mirror sq) | sq <- [0 .. 63]]
+    where mirror sq = col + (7 - row) * 8 where (row, col) = sq `divMod` 8
+
+-- Seen from white side; if negative, it's a penalty, of course
+-- The value will be multiplied by a centipawn parameter, like 50 cp
+kingPlaceBonus 0 = 2
+kingPlaceBonus 1 = 2
+kingPlaceBonus 2 = -1
+kingPlaceBonus 3 = -2
+kingPlaceBonus 4 = -2
+kingPlaceBonus 5 = -1
+kingPlaceBonus 6 = 2
+kingPlaceBonus 7 = 2
+kingPlaceBonus sq
+    | sq >= 32 = -10
+    | sq >= 24 = -6
+    | sq >= 16 = -2
+    | sq >= 8  = -1 + kingPlaceBonus (sq - 8)
+
 ------ Mobility ------
 data Mobility = Mobility	-- "safe" moves
 
 instance EvalItem Mobility where
     evalItem p c _ = mobDiff p c
-    evalItemNDL _ = [ ("mobilityPawn", (56, (10, 100))),
-                      ("mobilityKnight", (72, (60, 100))),
-                      ("mobilityBishop", (72, (60, 100))),
-                      ("mobilityRook", (48, (40, 100))),
-                      ("mobilityQueen", (3, (0, 50))) ]
+    evalItemNDL _ = [ ("mobilityPawn", (40, (10, 150))),
+                      ("mobilityKnight", (120, (60, 150))),
+                      ("mobilityBishop", (80, (60, 150))),
+                      ("mobilityRook", (80, (40, 150))),
+                      ("mobilityQueen", (100, (0, 150))) ]
+
+mobilityUnit :: Int
+mobilityUnit = 10	-- for 1024 mu per square
 
 -- Here we calculate pawn mobility only for attacs, it should be the rest also!
 mobDiff :: MyPos -> Color -> IParams
-mobDiff p _ = [a, n, b, r, q]
-    where !whN = popCount1 $ whNAttacs p `less` (white p .|. blPAttacs p)
-          !whB = popCount1 $ whBAttacs p `less` (white p .|. blPAttacs p)
-          !whR = popCount1 $ whRAttacs p `less` (white p .|. blA1)
-          !whQ = popCount1 $ whQAttacs p `less` (white p .|. blA2)
-          !whP = popCount1 $ whPAttacs p
-          !blA1 = blPAttacs p .|. blNAttacs p .|. blBAttacs p
-          !blA2 = blA1 .|. blRAttacs p
-          !blN = popCount1 $ blNAttacs p `less` (black p .|. whPAttacs p)
-          !blB = popCount1 $ blBAttacs p `less` (black p .|. whPAttacs p)
-          !blR = popCount1 $ blRAttacs p `less` (black p .|. whA1)
-          !blQ = popCount1 $ blQAttacs p `less` (black p .|. whA2)
-          !blP = popCount1 $ blPAttacs p
-          !whA1 = whPAttacs p .|. whNAttacs p .|. whBAttacs p
-          !whA2 = whA1 .|. whRAttacs p
-          !a = whP - blP
-          !n = whN - blN
-          !b = whB - blB
-          !r = whR - blR
-          !q = whQ - blQ
+mobDiff p _ = a `seq` n `seq` b `seq` r `seq` q `seq` [a, n, b, r, q]
+    where whPa = popCount1 $ whPAttacs p .&. black p
+          wp = white p .&. pawns p
+          whPm = pAll1MovesCount White wp (occup p) + pAll2MovesCount White wp (occup p)
+          blPa = popCount1 $ blPAttacs p .&. white p
+          bp = black p .&. pawns p
+          blPm = pAll1MovesCount Black bp (occup p) + pAll2MovesCount Black bp (occup p)
+          a = (3 * (whPa - blPa) `unsafeShiftR` 1) + whPm - blPm	-- captures more
+          n = (whN - blN) `unsafeShiftR` mobilityUnit
+          b = (whB - blB) `unsafeShiftR` mobilityUnit
+          r = (whR - blR) `unsafeShiftR` mobilityUnit
+          q = (whQ - blQ) `unsafeShiftR` mobilityUnit
+          whPairs = [(whPAttacs p, matPiece White Pawn),
+                     (whNAttacs p, matPiece White Knight),
+                     (whBAttacs p, matPiece White Bishop),
+                     (whRAttacs p, matPiece White Rook),
+                     (whQAttacs p, matPiece White Queen),
+                     (whKAttacs p, matPiece White King)]
+          blPairs = [(blPAttacs p, matPiece White Pawn),
+                     (blNAttacs p, matPiece White Knight),
+                     (blBAttacs p, matPiece White Bishop),
+                     (blRAttacs p, matPiece White Rook),
+                     (blQAttacs p, matPiece White Queen),
+                     (blKAttacs p, matPiece White King)]
+          whN = sum $ map (\sq -> mobPiece (matPiece White Knight) blPairs (whAttacs p)
+                                           (nAttacs sq `less` white p))
+                          $ bbToSquares $ knights p .&. white p
+          whB = sum $ map (\sq -> mobPiece (matPiece White Bishop) blPairs (whAttacs p)
+                                           (bAttacs (occup p) sq `less` white p))
+                          $ bbToSquares $ bishops p .&. white p
+          whR = sum $ map (\sq -> mobPiece (matPiece White Rook) blPairs (whAttacs p)
+                                           (rAttacs (occup p) sq `less` white p))
+                          $ bbToSquares $ rooks p .&. white p
+          whQ = sum $ map (\sq -> mobPiece (matPiece White Queen) blPairs (whAttacs p)
+                                           (qAttacs (occup p) sq `less` white p))
+                          $ bbToSquares $ queens p .&. white p
+          blN = sum $ map (\sq -> mobPiece (matPiece White Knight) whPairs (blAttacs p)
+                                           (nAttacs sq `less` black p))
+                          $ bbToSquares $ knights p .&. black p
+          blB = sum $ map (\sq -> mobPiece (matPiece White Bishop) whPairs (blAttacs p)
+                                           (bAttacs (occup p) sq `less` black p))
+                          $ bbToSquares $ bishops p .&. black p
+          blR = sum $ map (\sq -> mobPiece (matPiece White Rook) whPairs (blAttacs p)
+                                           (rAttacs (occup p) sq `less` black p))
+                          $ bbToSquares $ rooks p .&. black p
+          blQ = sum $ map (\sq -> mobPiece (matPiece White Queen) whPairs (blAttacs p)
+                                           (qAttacs (occup p) sq `less` black p))
+                          $ bbToSquares $ queens p .&. black p
+
+-- For mobility we have an own unit, call it MU, to take into account the reduction per square
+-- when that square is attacked by an enemy and still work with integers.
+-- We give 1000 MU for one possible move of a piece on an square which is not attacked by
+-- the enemy. If the square is attacked by an enemy piece which we could recapture, we give less:
+-- 1024 * ap / op
+-- where ap is the value of the enemy piece, op is the value of our piece
+-- If we could not recapture, we give only half of that value
+
+-- Mobility for one piece: we need the piece value, the pairs enemy attacs / enemy piece value,
+-- own attacs and the possible moves
+-- The ratios must be in increasing order, i.e. pawn attacs to queen attacs
+mobPiece :: Int -> [(BBoard, Int)] -> BBoard -> BBoard -> Int
+mobPiece opv prs oa db = free + att `div` opv
+    where (!att, _, !rest) = foldl f ini prs
+          ini = (0, 0, db)
+          f (!acc, !cov, !rst) (aa, apv) = (acc', cov', rst')
+              where !att = (rst .&. aa) `less` cov
+                    !pv  = min apv opv
+                    -- !rec = pv * (popCount1 $ att .&. oa)	-- not so easy with recaptures
+                    -- !nre = pv * (popCount1 $ att `less` oa)
+                    !nre = pv * (popCount1 att)		-- so we assume we cannot recapture
+                    -- acc' = acc + rec	+ (nre `unsafeShiftR` 1)
+                    acc' = acc + (nre `unsafeShiftR` 1)
+                    cov' = cov .|. aa
+                    rst' = rst `less` aa
+          free = popCount1 rest `unsafeShiftL` mobilityUnit
 
 ------ Center control ------
 data Center = Center
@@ -516,7 +612,7 @@ data Defend = Defend
 instance EvalItem Defend where
     evalItem p c _ = defended p
     evalItemNDL _  = [("defendFrac", (1, (0, 1))),
-                      ("undefendFrac", (8, (0, 8)))]
+                      ("undefendFrac", (1, (0, 1)))]	-- was 8 2x instead of 1!
 
 -- Same logic for defended as enPrise, but we take 1/4 of the value (half as for attacking)
 -- Here the recommended percentage is 5%, we have about 3%
@@ -555,59 +651,6 @@ defended p = [ def, undef ]
           !wundef = wus + wups
           !bundef = bus + bups
 
------- Castle rights ------
---data Castles = Castles
---
---instance EvalItem Castles where
---    evalItem p c _ = castles p c
---    evalItemNDL _ = [("castlePoints", (0, (-50, 200)))]
-
--- This will have to be replaced, because not the castle rights are important, but
--- the king safety and the rook mobility
---castles :: MyPos -> Color -> IParams
---castles p _ = [crd]
---    where (ok, ork, orq, ak, ark, arq) = (4, 7, 0, 60, 63, 56)
---          !epc = epcas p
---          !okmoved = not $ epc `testBit` ok
---          !akmoved = not $ epc `testBit` ak
---          !orkc = if epc `testBit` ork then 1 else 0
---          !arkc = if epc `testBit` ark then 1 else 0
---          !orqc = if epc `testBit` orq then 1 else 0
---          !arqc = if epc `testBit` arq then 1 else 0
---          !co = if okmoved then 0 else orkc + orqc
---          !ca = if akmoved then 0 else arkc + arqc
---          !cdiff = co - ca
---          !qfact = popCount1 $ queens p
---          !rfact = popCount1 $ rooks p
---          !crd = cdiff * (2 * qfact + rfact)
-
------- Last Line ------
-data LastLine = LastLine
-
-instance EvalItem LastLine where
-    evalItem p c _ = lastline p c
-    evalItemNDL _ = [("lastLinePenalty", (8, (0, 24)))]
-
-lastline :: MyPos -> Color -> IParams
-lastline p _ = [cdiff]
-    where !whl = popCount1 $ (white p `less` (rooks p .|. kings p)) .&. 0xFF
-          !bll = popCount1 $ (black p `less` (rooks p .|. kings p)) .&. 0xFF00000000000000
-          !cdiff = bll - whl
-
------- King Mobility when alone ------
---data KingMob = KingMob
---
---instance EvalItem KingMob where
---    evalItem p c _ = kingAlone p c
---    evalItemNDL _ = [("advKingAlone", (26, (0, 100)))]
---
---kingAlone :: MyPos -> Color -> IParams
---kingAlone p _ = [kmb]
---    where !kmb = if okalone then 8 - okmvs + together else 0
---          !together = popCount1 $ whKAttacs p .&. blKAttacs p
---          !okmvs = popCount1 $ blAttacs p
---          !okalone = black p `less` kings p == 0
-
 ------ Redundance: bishop pair and rook redundance ------
 data Redundance = Redundance
 
@@ -630,23 +673,6 @@ evalRedundance p _ = [bp, rr]
           !wrr = if wro > 1 then 1 else 0
           !brr = if bro > 1 then 1 else 0
           !rr  = wrr - brr
-
------- Knight & Rook correction according to own pawns ------
-data NRCorrection = NRCorrection
-
-instance EvalItem NRCorrection where
-    evalItem p _ _ = evalNRCorrection p
-    evalItemNDL _  = [("nrCorrection", (0, (0, 8)))]
-
-evalNRCorrection :: MyPos -> [Int]
-evalNRCorrection p = [md]
-    where !wpc = popCount1 (pawns p .&. white p) - 5
-          !bpc = popCount1 (pawns p .&. black p) - 5
-          !wnp = popCount1 (knights p .&. white p) * wpc * 6	-- 1/16 for each pawn over 5
-          !bnp = popCount1 (knights p .&. black p) * bpc * 6	-- 1/16 for each pawn over 5
-          !wrp = - popCount1 (rooks p .&. white p) * wpc * 12	-- 1/8 for each pawn under 5
-          !brp = - popCount1 (rooks p .&. black p) * bpc * 12	-- 1/8 for each pawn under 5
-          !md = wnp + wrp - bnp - brp
 
 ------ Rook pawn weakness ------
 data RookPawn = RookPawn
@@ -713,6 +739,6 @@ passPawns p _ = [dfp, dfp4, dfp5, dfp6, dfp7]
           !dfp5 = wfp5 - bfp5
           !dfp6 = wfp6 - bfp6
           !dfp7 = wfp7 - bfp7
-          wpIsPass sq = (whitePassPBBs!sq) .&. bpawns == 0
-          bpIsPass sq = (blackPassPBBs!sq) .&. wpawns == 0
+          wpIsPass sq = (whitePassPBBs `unsafeAt` sq) .&. bpawns == 0
+          bpIsPass sq = (blackPassPBBs `unsafeAt` sq) .&. wpawns == 0
 --------------------------------------
