@@ -550,22 +550,80 @@ instance EvalItem Mobility where
 -- Here we do not calculate pawn mobility (which, calculated as attacs, is useless)
 mobDiff :: MyPos -> IWeights
 mobDiff p = [n, b, r, q]
-    where !myN = popCount1 $ myNAttacs p `less` (me p .|. yoPAttacs p)
-          !myB = popCount1 $ myBAttacs p `less` (me p .|. yoPAttacs p)
-          !myR = popCount1 $ myRAttacs p `less` (me p .|. yoA1)
-          !myQ = popCount1 $ myQAttacs p `less` (me p .|. yoA2)
+    where !myN = mobCurve mobKnightArr $ popCount1 $ myNAttacs p `less` (me p .|. yoPAttacs p)
+          !myB = mobCurve mobBishopArr $ popCount1 $ myBAttacs p `less` (me p .|. yoPAttacs p)
+          !myR = mobCurve mobRookArr   $ popCount1 $ myRAttacs p `less` (me p .|. yoA1)
+          !myQ = mobCurve mobQueenArr  $ popCount1 $ myQAttacs p `less` (me p .|. yoA2)
           !yoA1 = yoPAttacs p .|. yoNAttacs p .|. yoBAttacs p
           !yoA2 = yoA1 .|. yoRAttacs p
-          !yoN = popCount1 $ yoNAttacs p `less` (yo p .|. myPAttacs p)
-          !yoB = popCount1 $ yoBAttacs p `less` (yo p .|. myPAttacs p)
-          !yoR = popCount1 $ yoRAttacs p `less` (yo p .|. myA1)
-          !yoQ = popCount1 $ yoQAttacs p `less` (yo p .|. myA2)
+          !yoN = mobCurve mobKnightArr $ popCount1 $ yoNAttacs p `less` (yo p .|. myPAttacs p)
+          !yoB = mobCurve mobBishopArr $ popCount1 $ yoBAttacs p `less` (yo p .|. myPAttacs p)
+          !yoR = mobCurve mobRookArr   $ popCount1 $ yoRAttacs p `less` (yo p .|. myA1)
+          !yoQ = mobCurve mobQueenArr  $ popCount1 $ yoQAttacs p `less` (yo p .|. myA2)
           !myA1 = myPAttacs p .|. myNAttacs p .|. myBAttacs p
           !myA2 = myA1 .|. myRAttacs p
           !n = myN - yoN
           !b = myB - yoB
           !r = myR - yoR
           !q = myQ - yoQ
+          mobCurve a = \x -> unsafeAt a x
+
+mobKnightArr, mobBishopArr, mobRookArr, mobQueenArr :: UArray Int Int
+mobKnightArr = listArray (0, 16) [-16, -10, -7, -5, -4, -3, -2, -1, 0, 1, 1, 2, 2, 2, 4, 4, 4]
+mobBishopArr = listArray (0, 26) [-20, -16, -13, -11, -9, -8, -7, -6, -5, -4, -3, -2, -1,
+                                  0, 1, 1, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4]
+mobRookArr   = listArray (0, 29) [-16, -14, -12, -11, -10, -9, -8, -7, -6, -5, -4, -3, -2, -1,
+                                  0, 1, 1, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 4]
+mobQueenArr  = listArray (0, 55) [-27, -26, -25, -24, -23, -22, -21, -20, -19, -18, -17, -16, -15,
+                                  -14, -13, -12, -11, -10, -9, -8, -7, -6, -5, -4, -3, -2, -1,
+                                  0, 1, 2, 2, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 5, 5, 6, 6, 6,
+                                  6, 6, 6, 7, 7, 7, 7, 7, 7]
+
+{--
+ instance EvalItem Mobility where
+-    evalItem p c _ = mobDiff p c
+-    evalItemNDL _ = [ ("mobilityKnight", (18, (0, 50))),
+-                      ("mobilityBishop", (18, (0, 50))),
+-                      ("mobilityRook", (12, (0, 50))),
+-                      ("mobilityQueen", (1, (0, 25))) ]
++    evalItem _ p _ = mobDiff p
++    evalItemNDL _  = [ ("mobilityKnight", (72, (60, 100))),
++                       ("mobilityBishop", (72, (60, 100))),
++                       ("mobilityRook", (48, (40, 100))),
++                       ("mobilityQueen", (3, (0, 50))) ]
+ 
+ -- Here we do not calculate pawn mobility (which, calculated as attacs, is useless)
+--- With the attacks bitmaps we change the mobility logic. We give:
+--- 2 pts for free, 1 points for the rest
+--- We rescale the weights for mobility (div 4) to account for this change
+-mobDiff :: MyPos -> Color -> IParams
+-mobDiff !p _ = [n, b, r, q]
+-    where !whN = sum $ map (mobW mobKnightArr) $ bbToSquares $ white p .&. knights p
+-          !whB = sum $ map (mobW mobBishopArr) $ bbToSquares $ white p .&. bishops p
+-          !whR = sum $ map (mobW mobRookArr  ) $ bbToSquares $ white p .&. rooks   p
+-          !whQ = sum $ map (mobW mobQueenArr ) $ bbToSquares $ white p .&. queens  p
+-          !blN = sum $ map (mobB mobKnightArr) $ bbToSquares $ black p .&. knights p
+-          !blB = sum $ map (mobB mobBishopArr) $ bbToSquares $ black p .&. bishops p
+-          !blR = sum $ map (mobB mobRookArr  ) $ bbToSquares $ black p .&. rooks   p
+-          !blQ = sum $ map (mobB mobQueenArr ) $ bbToSquares $ black p .&. queens  p
+-          !n = whN - blN
+-          !b = whB - blB
+-          !r = whR - blR
+-          !q = whQ - blQ
+-          mobW a = \sq -> let !reach  = unsafeIndex (actVec p) sq `less` white p
+-                              !unsure = reach .&. blAttacs p
+-                              !cr = popCount1 reach
+-                              !cu = popCount1 unsure
+-                              !mo = unsafeAt a $ 2 * cr - cu
+-                          in mo
+-          mobB a = \sq -> let !reach  = unsafeIndex (actVec p) sq `less` black p
+-                              !unsure = reach .&. whAttacs p
+-                              !cr = popCount1 reach
+-                              !cu = popCount1 unsure
+-                              !mo = unsafeAt a $ 2 * cr - cu
+-                          in mo
+-
+--}
 
 ------ Center control ------
 data Center = Center
