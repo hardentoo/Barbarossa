@@ -34,10 +34,10 @@ instance Storable Cell where
 
 data Cache
     = Cache {
-          mem 	:: Ptr Cell,	-- the cache line aligned byte array for the data
+          mem 	 :: Ptr Cell,	-- the cache line aligned byte array for the data
           lomask, mimask,
           himask :: !Mask,	-- masks depending on the size (in entries) of the table
-          gener :: !Word64	-- the generation of the current search
+          gener  :: !Word64	-- the generation of the current search
       }
 
 data PCacheEn = PCacheEn { lo, hi :: {-# UNPACK #-} !Word64 }	-- a packed TT entry
@@ -52,7 +52,7 @@ instance Storable PCacheEn where
     peek e = let q = castPtr e
              in do w1 <- peekElemOff q 0
                    w2 <- peekElemOff q 1
-                   return $ PCacheEn { lo = w1, hi = w2 }
+                   return PCacheEn { lo = w1, hi = w2 }
     {-# INLINE poke #-}
     poke e (PCacheEn { lo = w1, hi = w2 })
            = let q = castPtr e
@@ -67,12 +67,18 @@ A packed cache entry consists of 2 Word64 parts (the order of the bit fields is 
 	- unused bits - variable length depending on number of tt entries (= ttbitlen - 16)
 	- score - 16 bits
 	- part 3 of the ZKey: the last 2 bits
-- word 2 (low) contains:
+- word 2 (low) contains (old):
 	- nodes - 32 bits
 	- node type - 2 bit: exact = 2, lower = 1, upper = 0
 	- depth -  5 bits
 	- move  - 19 bits
 	- generation - 6 bits
+- word 2 (low) contains (new):
+	- generation - 8 bits
+	- node type - 2 bit: exact = 2, lower = 1, upper = 0
+	- depth -  6 bits
+	- nodes - 32 bits
+	- move  - 16 bits
 It results that anyway the number of entries in the table must be at least 2^18
 (i.e. 2^16 cells with 4 entries each), in which case the "unused bits" part is empty (0 bits).
 Part 2 of the ZKey is the cell number where the entry resides.
@@ -105,9 +111,13 @@ newCache mb = do
     return Cache { mem = memc, lomask = lom, mimask = mim, himask = complement lom, gener = 0 }
     where cellMask = complement part3Mask	-- for speed we keep both masks
 
--- Increase the generation by 1 for a new search, wrap on 6 bits (i.e. 0 to 63)
+generInc, generMsk :: Word64
+generInc = 0x0100000000000000	-- 1 in first byte
+generMsk = 0xFF00000000000000	-- to mask all except generation
+
+-- Increase the generation by 1 for a new search, it wraps automatically, beeing in higherst 8 bits
 newGener :: Cache -> Cache
-newGener c = c { gener = (gener c + 1) .&. 0x3F }
+newGener c = c { gener = gener c + generInc }
 
 -- This computes the adress of the first entry of the cell where an entry given by the key
 -- should be stored, and the (ideal) index of that entry
@@ -126,7 +136,7 @@ zKeyToCellIndex tt zkey = (base, idx)
 
 -- Retrieve the ZKey of a packed entry
 getZKey :: Cache -> Index -> PCacheEn -> ZKey
-getZKey tt idx (PCacheEn {hi = w1}) = zkey
+getZKey tt !idx (PCacheEn {hi = w1}) = zkey
     where !zkey =  w1 .&. himask tt	-- the first part of the stored ZKey
                .|. widx .&. mimask tt	-- the second part of the stored ZKey
                .|. w1 .&. part3Mask	-- the 3rd part of stored ZKey
@@ -174,61 +184,60 @@ writeCache tt zkey depth tp score move nodes = do
     let (bas, idx) = zKeyToCellIndex tt zkey
         gen = gener tt
         pCE = quintToCacheEn tt zkey depth tp score move nodes
-    store gen pCE idx bas bas (4::Int)
-    where store gen pCE idx = go
-              where go !crt0 !rep0 !tries0 = do
+    store gen pCE idx bas bas maxBound (4::Int)
+    where store gen !pCE idx = go
+              where go !crt0 !rep0 !sco0 !tries0 = do
                        cpCE <- peek crt0
                        if isSameEntry tt zkey idx cpCE
                           then poke crt0 pCE	 -- here we found the same entry: just update
-                          else if tries0 <= 1
-                              then poke rep0 pCE -- replace the weakest entry with the current one
-                              else do	-- search further
-                                  rep1 <- chooseReplaceEntry gen crt0 rep0
-                                  let crt1 = crt0 `plusPtr` pCacheEnSize
-                                      tries1 = tries0 - 1
-                                  go crt1 rep1 tries1
+                          else do
+                              let (rep1, sco1) = scoreReplaceEntry gen cpCE crt0 rep0 sco0
+                              if tries0 <= 1
+                                 then poke rep1 pCE -- replace the weakest entry so far
+                                 else do	-- search further
+                                     let crt1 = crt0 `plusPtr` pCacheEnSize
+                                         tries1 = tries0 - 1
+                                     go crt1 rep1 sco1 tries1
 
 -- Here we implement the logic which decides which entry is weaker
--- If the current entry has the current generation then we consider the old replacement to be weaker
--- without to consider other criteria in case it has itself the current generation
-chooseReplaceEntry :: Word64 -> Ptr PCacheEn -> Ptr PCacheEn -> IO (Ptr PCacheEn)
-chooseReplaceEntry gen crt rep = if rep == crt then return rep else do
-    crte <- peek crt
-    if generation crte == gen
-       then return rep
-       else do
-           repe <- peek rep
-           if betterpart repe > betterpart crte
-              then return crt
-              else return rep
-    where generation = (.&. 0x3F) . lo
-          betterpart = lo	-- there is some noise at the end of that word (26 bits), but we don't care
+-- the low word is the score (when the move is masked away):
+-- generation (when > curr gen: whole score is 0)
+-- type (2 - exact - only few entries, PV, 1 - lower bound: have good moves, 0 - upper bound)
+-- depth
+-- nodes
+scoreReplaceEntry :: Word64 -> PCacheEn -> Ptr PCacheEn -> Ptr PCacheEn -> Word64 -> (Ptr PCacheEn, Word64)
+scoreReplaceEntry gen crte crt rep sco
+    | sco' < sco = (crt, sco')
+    | otherwise  = (rep, sco)
+    where sco' | generation > gen = 0
+               | otherwise        = lowm
+          low = lo crte
+          generation = low .&. generMsk
+          lowm = low .&. 0xFFFF	-- mask the move
 
 quintToCacheEn :: Cache -> ZKey -> Int -> Int -> Int -> Move -> Int -> PCacheEn
 quintToCacheEn tt zkey depth tp score (Move move) nodes = pCE
     where w1 =   (zkey .&. himask tt)
              .|. fromIntegral ((score .&. 0xFFFF) `unsafeShiftL` 2)
              .|. (zkey .&. part3Mask)
-          w2 =   (fromIntegral nodes `unsafeShiftL` 32)
-             .|. (fromIntegral tp    `unsafeShiftL` 30)
-             .|. (fromIntegral depth `unsafeShiftL` 25)
-             .|. (fromIntegral move  `unsafeShiftL`  6)
-             .|. gener tt
+          w2 = gener tt
+             .|. (fromIntegral tp    `unsafeShiftL` 54)
+             .|. (fromIntegral depth `unsafeShiftL` 48)
+             .|. (fromIntegral nodes `unsafeShiftL` 16)
+             .|. (fromIntegral move)
           !pCE = PCacheEn { hi = w1, lo = w2 }
 
 cacheEnToQuint :: PCacheEn -> (Int, Int, Int, Move, Int)
 cacheEnToQuint (PCacheEn { hi = w1, lo = w2 }) = (de, ty, sc, Move mv, no)
     where scp = (w1 .&. 0x3FFFF) `unsafeShiftR` 2
-          ssc = (fromIntegral scp) :: Int16
+          ssc = fromIntegral scp :: Int16
           !sc = fromIntegral ssc
-          !no = fromIntegral $ w2 `unsafeShiftR` 32
-          -- w2low = (fromIntegral (w2 .&. 0xFFFFFFFF)) :: Word32
-          w2low = (fromIntegral w2) :: Word32	-- does it work so?
-          w21 = w2low `unsafeShiftR` 6		-- don't need the generation
-          !mv = fromIntegral $ w21 .&. 0x7FFFF
-          w22 = w21 `unsafeShiftR` 19
-          !de = fromIntegral $ w22 .&. 0x1F
-          !ty = fromIntegral $ w22 `unsafeShiftR` 5
+          !no = fromIntegral $ w2 `unsafeShiftR` 16
+          w2lo = fromIntegral w2 :: Word32
+          !mv = fromIntegral $ w2lo .&. 0xFFFF
+          w2hi = fromIntegral (w2 `unsafeShiftR` 32) :: Word32
+          !de = fromIntegral $ (w2hi `unsafeShiftR` 16) .&. 0x3F
+          !ty = fromIntegral $ (w2hi `unsafeShiftR` 22) .&. 0x3
           -- perhaps is not a good idea to make them dependent on each other
           -- this must be tested and optimised for speed
 
@@ -240,13 +249,13 @@ nextPowOf2 x = bit (l - 1)
 ----------- QuickCheck -------------
 newtype Quint = Q (Int, Int, Int, Move, Int) deriving Show
 
-mvm = (1 `shiftL` 19) - 1 :: Word32
+mvm = (1 `shiftL` 16) - 1 :: Word32
 
 instance Arbitrary Quint where
     arbitrary = do
         sc <- choose (-20000, 20000)
         ty <- choose (0, 2)
-        de <- choose (0, 31)
+        de <- choose (0, 63)
         mv <- arbitrary `suchThat` (<= mvm)
         no <- arbitrary `suchThat` (>= 0)
         return $ Q (de, ty, sc, Move mv, no)

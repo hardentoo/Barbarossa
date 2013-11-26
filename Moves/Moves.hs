@@ -155,9 +155,9 @@ pAll2MovesCount Black !pawns !occup = popCount1 $ (pawns2 `unsafeShiftR` 16) `le
 
 {-# INLINE fAttacs #-}
 fAttacs :: Square -> Piece -> BBoard -> BBoard  -- piece attacs except pawn
-fAttacs sq King   _  = kAttacs sq
-fAttacs sq Knight _  = nAttacs sq
-fAttacs sq Bishop oc = bAttacs oc sq
-fAttacs sq Rook   oc = rAttacs oc sq
-fAttacs sq Queen  oc = qAttacs oc sq
+fAttacs sq King   !oc = kAttacs    sq
+fAttacs sq Knight !oc = nAttacs    sq
+fAttacs sq Bishop !oc = bAttacs oc sq
+fAttacs sq Rook   !oc = rAttacs oc sq
+fAttacs sq Queen  !oc = qAttacs oc sq
 fAttacs _  _      _  = 0	-- this would be for pawn, which is calculated different

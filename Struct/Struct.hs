@@ -1,7 +1,7 @@
 {-# LANGUAGE BangPatterns #-}
 module Struct.Struct (
          BBoard, Square, ZKey, ShArray, MaArray, DbArray, Move(..),
-         Piece(..), Color(..), BasicPos(..), TabCont(..), MyPos(..),
+         Piece(..), Color(..), TabCont(..), MyPos(..),
          black, slide, kkrq, diag, epcas, other, moving,
          epMask, fyMask, fyIncr, fyZero, mvMask, caRiMa,
          caRKiw, caRQuw, caRMKw, caRMQw, caRKib, caRQub, caRMKb, caRMQb,
@@ -9,7 +9,7 @@ module Struct.Struct (
          fromSquare, toSquare, isSlide, isDiag, isKkrq,
          moveIsNormal, moveIsCastle, moveIsTransf, moveIsEnPas,
          moveColor, moveTransfPiece, moveEnPasDel, makeEnPas,
-         makeCastleFor, makeTransf, makeSpecial, moveIsSpecial, moveFromTo,
+         makeCastleFor, makeTransf, moveFromTo,
          activateTransf, fromColRow, checkCastle, checkEnPas, toString
          -- isPawnMoving, isKingMoving
     ) where
@@ -37,66 +37,24 @@ data Piece = Pawn | Knight | Bishop | Rook | Queen | King
 
 data Color = White | Black deriving (Eq, Show, Ord, Enum, Ix)
 
--- This is the complete representation of a position, no redundant fields
-data BasicPos = BPos {
-    bpblack, bpslide, bpkkrq, bpdiag, bpepcas :: !BBoard
-    }
-    deriving (Eq, Show)
-
--- Storable is needed for the hash (transposition) table
-instance Storable BasicPos where
-    sizeOf _ = 5 * sizeOf (undefined :: BBoard)
-    alignment _ = alignment (undefined :: BBoard)
-
-    {-# INLINE peek #-}
-    peek p = let q = castPtr p
-             in do b <- peekElemOff q 0
-                   s <- peekElemOff q 1
-                   k <- peekElemOff q 2
-                   d <- peekElemOff q 3
-                   e <- peekElemOff q 4
-                   return $ BPos b s k d e
-
-    {-# INLINE poke #-}
-    poke p (BPos b s k d e)
-            = let q = castPtr p
-              in do pokeElemOff q 0 b
-                    pokeElemOff q 1 s
-                    pokeElemOff q 2 k
-                    pokeElemOff q 3 d
-                    pokeElemOff q 4 e
-
 data TabCont = Empty
              | Busy !Color !Piece
              deriving (Eq, Show)
 
 data MyPos = MyPos {
-    basicPos :: !BasicPos,	-- should not be strict here
+    black, slide, kkrq, diag, epcas :: !BBoard, -- These fields completely represents of a position
     zobkey :: !ZKey,	-- hash key
     mater :: !Int,	-- material balance
     stage :: !Int,	-- total mat value of figures on the board in pawns, starts with 6000
-    white, occup, kings, pawns :: !BBoard,	-- further heavy used bitboards computed for efficiency
-    queens, rooks, bishops, knights :: !BBoard,
-    whAttacs, blAttacs :: !BBoard,		-- white & black attacs
-    whPAttacs, whNAttacs, whBAttacs, whRAttacs, whQAttacs, whKAttacs :: !BBoard,
-    blPAttacs, blNAttacs, blBAttacs, blRAttacs, blQAttacs, blKAttacs :: !BBoard,
-    staticScore :: !Int
-    -- staticFeats :: [Int]
-    -- realMove :: !Bool
+    me, yo, occup, kings, pawns :: !BBoard,	-- further heavy used bitboards computed for efficiency
+    queens, rooks, bishops, knights, passed :: !BBoard,
+    myAttacs, yoAttacs, check :: BBoard,		-- my & yours attacs, check
+    myPAttacs, myNAttacs, myBAttacs, myRAttacs, myQAttacs, myKAttacs :: BBoard,
+    yoPAttacs, yoNAttacs, yoBAttacs, yoRAttacs, yoQAttacs, yoKAttacs :: BBoard,
+    staticScore :: Int,
+    staticFeats :: [Int]
     }
     deriving (Eq, Show)
-
--- These functions are defined for convenience and of course inlined:
-{-# INLINE black #-}
-black = bpblack . basicPos
-{-# INLINE slide #-}
-slide = bpslide . basicPos
-{-# INLINE kkrq #-}
-kkrq = bpkkrq . basicPos
-{-# INLINE diag #-}
-diag = bpdiag . basicPos
-{-# INLINE epcas #-}
-epcas = bpepcas . basicPos
 
 {-
 Piece coding in MyPos (vertical over slide, kkrq and diag):
@@ -129,7 +87,7 @@ tabla :: MyPos -> Square -> TabCont
 tabla p sq
     | occup p .&. bsq == 0 = Empty
     | otherwise            = Busy c f
-    where c = if white p .&. bsq /= 0 then White else Black
+    where c = if black p .&. bsq /= 0 then Black else White
           f = pieceAt p bsq
           bsq = 1 `unsafeShiftL` sq
 
@@ -159,27 +117,26 @@ caRQub = 0x1100000000000000	-- black: king & rook position for queenside castle
 caRMKb = 0x6000000000000000	-- black: empty fields for kingside castle
 caRMQb = 0x0E00000000000000	-- black: empty fields for queenside castle
 
-emptyBPos = BPos {
-        bpblack = 0, bpslide = 0, bpkkrq = 0, bpdiag = 0, bpepcas = 0
-    }
 emptyPos = MyPos {
-        basicPos = emptyBPos, zobkey = 0, mater = 0, stage = 0,
-        white = 0, occup = 0, kings = 0, pawns = 0,
+        black = 0, slide = 0, kkrq = 0, diag = 0, epcas = 0,
+        zobkey = 0, mater = 0, stage = 0,
+        me = 0, yo = 0, occup = 0, kings = 0, pawns = 0,
         queens = 0, rooks = 0, bishops = 0, knights = 0,
-        whAttacs = 0, blAttacs = 0,
-        whPAttacs = 0, whNAttacs = 0, whBAttacs = 0, whRAttacs = 0, whQAttacs = 0, whKAttacs = 0,
-        blPAttacs = 0, blNAttacs = 0, blBAttacs = 0, blRAttacs = 0, blQAttacs = 0, blKAttacs = 0,
-        staticScore = 0		-- , staticFeats = [], realMove = False
+        myAttacs = 0, yoAttacs = 0, check = 0,
+        myPAttacs = 0, myNAttacs = 0, myBAttacs = 0, myRAttacs = 0, myQAttacs = 0, myKAttacs = 0,
+        yoPAttacs = 0, yoNAttacs = 0, yoBAttacs = 0, yoRAttacs = 0, yoQAttacs = 0, yoKAttacs = 0,
+        staticScore = 0, passed = 0,
+        staticFeats = []
     }
 
 -- Stuff related to 50 moves rule
 {-# INLINE isReversible #-}
 isReversible :: MyPos -> Bool
-isReversible p = fyMask .&. bpepcas (basicPos p) /= 0
+isReversible p = fyMask .&. epcas p /= 0
 
 {-# INLINE remis50Moves #-}
 remis50Moves :: MyPos -> Bool
-remis50Moves p = bpepcas (basicPos p) .&. fyMask >= fyMaxi
+remis50Moves p = epcas p .&. fyMask >= fyMaxi
 
 {-# INLINE reset50Moves #-}
 reset50Moves :: BBoard -> BBoard
@@ -275,9 +232,12 @@ moveIsNormal (Move m) = m .&. 0xE000 == 0
 -- For which color is the move:
 -- But, as for now, we don't set the move color! (And don't use it too)
 moveColor :: Move -> Color
+moveColor (Move m) = if testBit m 12 then Black else White
+{-
 moveColor (Move m) = case testBit m 12 of
                          False -> White
                          _     -> Black
+-}
 
 -- Castles
 moveIsCastle :: Move -> Bool
@@ -346,12 +306,6 @@ movetype t w = fromIntegral (t `shiftL` 12) .|. w
 -- code :: Word32 -> Word32 -> Word32
 -- code c w = (c `shiftL` 14) .|. w
 
-makeSpecial :: Move -> Move
-makeSpecial (Move m) = Move $ m `setBit` 18
-
-moveIsSpecial :: Move -> Bool
-moveIsSpecial (Move m) = m `testBit` 18
-
 fromSquare :: Move -> Square
 fromSquare (Move m) = fromIntegral (m `shiftR` 6) .&. 0x3F
 
@@ -401,7 +355,7 @@ toString m = col sc : row sr : col dc : row dr : transf
           ord1 = ord '1'
           col x = chr (orda + x)
           row x = chr (ord1 + x)
-          transf = if moveIsTransf m then [pcToCh (moveTransfPiece m)] else []
+          transf = [pcToCh (moveTransfPiece m) | moveIsTransf m ]
           pcToCh Queen  = 'q'
           pcToCh Rook   = 'r'
           pcToCh Bishop = 'b'

@@ -51,7 +51,6 @@ toNiceNotation p m
                  | otherwise             = False
           capt = if iscapt then "x" else ""
           att = fAttacs d fig (occup p)
-          our = if fcol == White then white p else black p
           src | fig == Pawn = if iscapt then col sc : "" else ""
               | fig == King = ""
               | fig == Knight = desamb (knights p)
@@ -71,7 +70,7 @@ toNiceNotation p m
               | popCount1 (b0 .&. colBB sc) == 1 = col sc : ""
               | popCount1 (b0 .&. rowBB sr) == 1 = row sr : ""
               | otherwise         = col sc : row sr : ""
-              where b0 = b .&. att .&. our
+              where b0 = b .&. att .&. me p
 
 pcToCh :: Bool -> Piece -> String
 pcToCh _ King   = "K"
@@ -97,7 +96,7 @@ fromNiceNotation p c = do
                    dst  <- parseSrcDst
                    return (Just src, capt, dst)
                else do
-                   mdst <- (parseSrcDst >>= return . Just) <|> return Nothing
+                   mdst <- fmap Just parseSrcDst <|> return Nothing
                    case mdst of
                        Just dst -> return (Just src, capt, dst)
                        Nothing  -> return (Nothing,  capt, src)
@@ -122,8 +121,7 @@ fromNiceNotation p c = do
 -- Todo here: promotion and en passant!
 parsePawnCapt p x sqdst mtra = do
     let fcol = moving p
-        our = if fcol == White then white p else black p
-        target = our .&. pawns p
+        target = me p .&. pawns p
         att  = pAttacs (other fcol) sqdst
     sqsrc <- bbToSingleSquare (target .&. att .&. colBB x)
     return $ moveFromTo sqsrc sqdst
@@ -131,20 +129,17 @@ parsePawnCapt p x sqdst mtra = do
 -- Todo here: promotion and en passant!
 parsePawnMove p x sqdst mtra = do
     let fcol = moving p
-        our = if fcol == White then white p else black p
-        target = our .&. pawns p
+        target = me p .&. pawns p
         att  = pAttacs (other fcol) sqdst
     sqsrc <- bbToSingleSquare (target .&. att .&. colBB x)
     return $ moveFromTo sqsrc sqdst
 
 parseFigureMove p piece msrc sqdst = do
-    let fcol = moving p
-        our = if fcol == White then white p else black p
-        target | piece == King = our .&. kings p
-               | piece == Queen = our .&. queens p
-               | piece == Rook = our .&. rooks p
-               | piece == Bishop = our .&. bishops p
-               | piece == Knight = our .&. knights p
+    let target | piece == King = me p .&. kings p
+               | piece == Queen = me p .&. queens p
+               | piece == Rook = me p .&. rooks p
+               | piece == Bishop = me p .&. bishops p
+               | piece == Knight = me p .&. knights p
         att = fAttacs sqdst piece (occup p)
     sqsrc <- case msrc of
                  Just (SDCol x) -> bbToSingleSquare (target .&. att .&. colBB x) 
@@ -156,7 +151,7 @@ parseFigureMove p piece msrc sqdst = do
 
 parsePiece = parseFigure <|> return Pawn
 
-parseFigure = P.oneOf "KQRBN" >>= return . chToPc
+parseFigure = fmap chToPc $ P.oneOf "KQRBN"
 
 chToPc 'K' = King
 chToPc 'Q' = Queen
@@ -165,21 +160,22 @@ chToPc 'B' = Bishop
 chToPc 'N' = Knight
 
 parseSrcOrCapt = (P.char 'x' >> return (Right True))
-             <|> (parseSrcDst >>= return . Left)
+             <|> fmap Left parseSrcDst
 
 parseCapt = (P.char 'x' >> return True) <|> return False
 
 parseSrcDst = parseRow <|> parseColRow
 
-parseCol = P.oneOf "abcdefgh" >>= return . SDCol . (\c -> ord c - ord 'a')
+parseCol = fmap (SDCol . (\c -> ord c - ord 'a')) $ P.oneOf "abcdefgh"
 
-parseRow = P.oneOf "12345678" >>= return . SDRow . (\c -> ord c - ord '1')
+parseRow = fmap (SDRow . (\c -> ord c - ord '1')) $ P.oneOf "12345678"
 
 parseColRow = do
     col@(SDCol c) <- parseCol
     parseRow >>= \(SDRow r) -> return (SDColRow c r) <|> return col
 
-parseTransf = (P.oneOf "QRBNqrbn" >>= return . Just . chToPc . toUpper) <|> return Nothing
+parseTransf = fmap (Just . chToPc . toUpper) (P.oneOf "QRBNqrbn")
+              <|> return Nothing
 
 parseCheck = (P.char '+' >> return True) <|> return False
 
@@ -191,7 +187,7 @@ bbToSingleSquare b
     | otherwise  = fail "Ambiguous piece"
 
 posToFen :: MyPos -> String
-posToFen pos = concat $ intersperse " " [lines, tmv, cast, rest]
+posToFen pos = unwords [lines, tmv, cast, rest]
     where lines :: String
           lines = concat $ map (extline . foldl tra ("", 0))
                          $ map (\s -> map (tabla pos) [s..s+7]) $ reverse [0, 8 .. 56]
