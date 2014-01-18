@@ -353,7 +353,7 @@ data KingFuture = KingFuture
 
 instance EvalItem KingFuture where
     evalItem _ p _ = kingFuture p
-    evalItemNDL _  = [("kingFuture", (1, (0, 20)))]
+    evalItemNDL _  = [("kingFuture", (32, (0, 60)))]
 
 -- Given occupacy, a bitboard of forbidden squares, a target bitboard
 -- and a kind of piece (queen, rook, bishop, knight or king)
@@ -389,41 +389,41 @@ ksCoef :: [BBoard] -> [Int] -> BBoard -> Int
 ksCoef bbs is !bb = sum $ zipWith wei bbs is
     where wei b i = popCount (bb .&. b) * i
 
-ksCoefQueen = [32, 16, 8, 4]
-ksCoefRook  = [16,  8, 4, 2]
--- ksCoefMinor = KsIs  8  4  2 1
+ksCoefQueen = [16, 8]
+ksCoefRook  = [ 8, 4]
+ksCoefMinor = [ 4, 2]
 
 kingFuture :: MyPos -> IWeights
 kingFuture p = [v]
     where !v = mv - yv
-          !mv = mq + mr -- + mb + mn
+          !mv = mq + mr + mb + mn
           !mq | q == 0    = 0
               | otherwise = ksCoef (reach qAttacs (occup p) meforb metarg) ksCoefQueen q
               where q = queens p .&. me p
           !mr | r == 0    = 0
               | otherwise = ksCoef (reach rAttacs (occup p) meforb metarg) ksCoefRook  r
               where r = rooks p .&. me p
---          !mb | b == 0    = 0
---              | otherwise = ksCoef (reach bAttacs (occup p) meforb metarg) ksCoefMinor b
---              where b = bishops p .&. me p
---          !mn | n == 0    = 0
---              | otherwise = ksCoef (reach nattacs (occup p) meforb metarg) ksCoefMinor n
---              where n = knights p .&. me p
+          !mb | b == 0    = 0
+              | otherwise = ksCoef (reach bAttacs (occup p) meforb metarg) ksCoefMinor b
+              where b = bishops p .&. me p
+          !mn | n == 0    = 0
+              | otherwise = ksCoef (reach nattacs (occup p) meforb metarg) ksCoefMinor n
+              where n = knights p .&. me p
           !meforb = me p .|. yoPAttacs p .|. kings p
           !metarg = yo p .&. kings p .|. yoKAttacs p
-          !yv = yq + yr -- + yb + yn
+          !yv = yq + yr + yb + yn
           !yq | q == 0    = 0
               | otherwise = ksCoef (reach qAttacs (occup p) yoforb yotarg) ksCoefQueen q
               where q = queens p .&. yo p
           !yr | r == 0    = 0
               | otherwise = ksCoef (reach rAttacs (occup p) yoforb yotarg) ksCoefRook  r
               where r = rooks p .&. yo p
---          !yb | b == 0    = 0
---              | otherwise = ksCoef (reach bAttacs (occup p) yoforb yotarg) ksCoefMinor b
---              where b = bishops p .&. yo p
---          !yn | n == 0    = 0
---              | otherwise = ksCoef (reach nattacs (occup p) yoforb yotarg) ksCoefMinor n
---              where n = knights p .&. yo p
+          !yb | b == 0    = 0
+              | otherwise = ksCoef (reach bAttacs (occup p) yoforb yotarg) ksCoefMinor b
+              where b = bishops p .&. yo p
+          !yn | n == 0    = 0
+              | otherwise = ksCoef (reach nattacs (occup p) yoforb yotarg) ksCoefMinor n
+              where n = knights p .&. yo p
           !yoforb = yo p .|. myPAttacs p .|. kings p
           !yotarg = me p .&. kings p .|. myKAttacs p
           nattacs _ sq = nAttacs sq
