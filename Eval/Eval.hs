@@ -353,7 +353,7 @@ data KingFuture = KingFuture
 
 instance EvalItem KingFuture where
     evalItem _ p _ = kingFuture p
-    evalItemNDL _  = [("kingFuture", (32, (0, 60)))]
+    evalItemNDL _  = [("kingFuture", (16, (0, 60)))]
 
 -- Given occupacy, a bitboard of forbidden squares, a target bitboard
 -- and a kind of piece (queen, rook, bishop, knight or king)
@@ -363,6 +363,7 @@ instance EvalItem KingFuture where
 -- the forbidden squares)
 -- In our use case the forbidden squares will be: our pawns, the opponent
 -- pawns attacks and both king squares
+{-# INLINE reach #-}
 reach :: (BBoard -> Square -> BBoard) -> BBoard -> BBoard -> BBoard -> [BBoard]
 reach f !occ !fbd !tgt = map fst $ iterate next (tgt, tgt)
     where next (prev, cov) = (next, cov')
