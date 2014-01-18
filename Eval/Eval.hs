@@ -378,58 +378,51 @@ reach f !occ !fbd !tgt = map fst $ iterate next (tgt, tgt)
 -- so we will have the pieces which will reach the opponent king (neighbourhood)
 -- in 2, 3, 4 or 5 moves
 
-data KsBB = KsBB !BBoard !BBoard !BBoard !BBoard
-data KsIs = KsIs !Int !Int !Int !Int
-
--- Compute the bitboard quarter:
-{-# INLINE bbQuarter #-}
-bbQuarter :: (BBoard -> Square -> BBoard) -> BBoard -> BBoard -> BBoard -> KsBB
-bbQuarter f !occ !fbd !tgt = KsBB b0 b1 b2 b3
-    where (b0 : b1 : b2 : b3 : _) = drop 2 $ reach f occ fbd tgt
+-- data KsBB = KsBB !BBoard !BBoard !BBoard !BBoard
+-- data KsIs = KsIs !Int !Int !Int !Int
 
 -- Compute a king safety coefficient for one kind of piece
 -- given the corrsponding bitboard quarter (piece specific, precalculated),
 -- the int quarter (piece specific, eval parameter) and the bitboard
 -- of the piece type in the current position
-ksCoef :: KsBB -> KsIs -> BBoard -> Int
-ksCoef !(KsBB b0 b1 b2 b3) !(KsIs i0 i1 i2 i3) !bb = w
+ksCoef :: [BBoard] -> [Int] -> BBoard -> Int
+ksCoef bbs is !bb = sum $ zipWith wei bbs is
     where wei b i = popCount (bb .&. b) * i
-          !w = wei b0 i0 + wei b1 i1 + wei b2 i2 + wei b3 i3
 
-ksCoefQueen = KsIs 32 16  8 4
-ksCoefRook  = KsIs 16  8  4 2
-ksCoefMinor = KsIs  8  4  2 1
+ksCoefQueen = [32, 16, 8, 4]
+ksCoefRook  = [16,  8, 4, 2]
+-- ksCoefMinor = KsIs  8  4  2 1
 
 kingFuture :: MyPos -> IWeights
 kingFuture p = [v]
     where !v = mv - yv
           !mv = mq + mr -- + mb + mn
           !mq | q == 0    = 0
-              | otherwise = ksCoef (bbQuarter qAttacs (occup p) meforb metarg) ksCoefQueen q
+              | otherwise = ksCoef (reach qAttacs (occup p) meforb metarg) ksCoefQueen q
               where q = queens p .&. me p
           !mr | r == 0    = 0
-              | otherwise = ksCoef (bbQuarter rAttacs (occup p) meforb metarg) ksCoefRook  r
+              | otherwise = ksCoef (reach rAttacs (occup p) meforb metarg) ksCoefRook  r
               where r = rooks p .&. me p
 --          !mb | b == 0    = 0
---              | otherwise = ksCoef (bbQuarter bAttacs (occup p) meforb metarg) ksCoefMinor b
+--              | otherwise = ksCoef (reach bAttacs (occup p) meforb metarg) ksCoefMinor b
 --              where b = bishops p .&. me p
 --          !mn | n == 0    = 0
---              | otherwise = ksCoef (bbQuarter nattacs (occup p) meforb metarg) ksCoefMinor n
+--              | otherwise = ksCoef (reach nattacs (occup p) meforb metarg) ksCoefMinor n
 --              where n = knights p .&. me p
           !meforb = me p .|. yoPAttacs p .|. kings p
           !metarg = yo p .&. kings p .|. yoKAttacs p
           !yv = yq + yr -- + yb + yn
           !yq | q == 0    = 0
-              | otherwise = ksCoef (bbQuarter qAttacs (occup p) yoforb yotarg) ksCoefQueen q
+              | otherwise = ksCoef (reach qAttacs (occup p) yoforb yotarg) ksCoefQueen q
               where q = queens p .&. yo p
           !yr | r == 0    = 0
-              | otherwise = ksCoef (bbQuarter rAttacs (occup p) yoforb yotarg) ksCoefRook  r
+              | otherwise = ksCoef (reach rAttacs (occup p) yoforb yotarg) ksCoefRook  r
               where r = rooks p .&. yo p
 --          !yb | b == 0    = 0
---              | otherwise = ksCoef (bbQuarter bAttacs (occup p) yoforb yotarg) ksCoefMinor b
+--              | otherwise = ksCoef (reach bAttacs (occup p) yoforb yotarg) ksCoefMinor b
 --              where b = bishops p .&. yo p
 --          !yn | n == 0    = 0
---              | otherwise = ksCoef (bbQuarter nattacs (occup p) yoforb yotarg) ksCoefMinor n
+--              | otherwise = ksCoef (reach nattacs (occup p) yoforb yotarg) ksCoefMinor n
 --              where n = knights p .&. yo p
           !yoforb = yo p .|. myPAttacs p .|. kings p
           !yotarg = me p .&. kings p .|. myKAttacs p
