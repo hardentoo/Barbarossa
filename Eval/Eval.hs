@@ -12,7 +12,8 @@ module Eval.Eval (
 ) where
 
 import Prelude hiding ((++), head, foldl, map, concat, filter, takeWhile, iterate, sum, minimum,
-                       zip, zipWith, foldr, concatMap, length, replicate, lookup, repeat, null)
+                       zip, zipWith, foldr, concatMap, length, replicate, lookup, repeat, null,
+                       drop)
 import Data.Array.Base (unsafeAt)
 import Data.Bits hiding (popCount)
 import Data.List.Stream
@@ -88,6 +89,7 @@ evalItems = [ EvIt Material,	-- material balance (i.e. white - black material
               EvIt NRCorrection,	-- material correction for knights & rooks
               EvIt RookPawn,	-- the rook pawns are about 15% less valuable
               EvIt KingSafe,	-- king safety
+              EvIt KingFuture,	-- king future safety
               EvIt KingOpen,	-- malus for king openness
               -- EvIt KingCenter,	-- malus for king on center files
               EvIt KingPlace,	-- bonus when king is near some fields
@@ -345,6 +347,93 @@ attCoef = listArray (0, 63) [ f x | x <- [0..63] ]
 kingSquare :: BBoard -> BBoard -> Square
 kingSquare kingsb colorp = head $ bbToSquares $ kingsb .&. colorp
 {-# INLINE kingSquare #-}
+
+-- King Future ---
+data KingFuture = KingFuture
+
+instance EvalItem KingFuture where
+    evalItem _ p _ = kingFuture p
+    evalItemNDL _  = [("kingFuture", (1, (0, 20)))]
+
+-- Given occupacy, a bitboard of forbidden squares, a target bitboard
+-- and a kind of piece (queen, rook, bishop, knight or king)
+-- given as a function BBoard -> Square -> BBoard,
+-- compute a list of bitboards of squares from which such a piece would reach
+-- the target in an increasing number of secure moves (without to go through
+-- the forbidden squares)
+-- In our use case the forbidden squares will be: our pawns, the opponent
+-- pawns attacks and both king squares
+reach :: (BBoard -> Square -> BBoard) -> BBoard -> BBoard -> BBoard -> [BBoard]
+reach f !occ !fbd !tgt = map fst $ iterate next (tgt, tgt)
+    where next (prev, cov) = (next, cov')
+              where next = bbToSquaresBB (f occ) (prev `less` fbd) `less` cov
+                    cov' = cov .|. next
+
+-- For king safety we will use only the first 4 bitboards
+-- of the reach function, i.e. already there, in one move,
+-- in 2 moves and in 3 moves, and this only for queen, rook, bishop and knight
+-- So we need some "quarter" of bitboards and some of int to compute a score
+-- Because we use already the king safety, which is considering the near
+-- attacks, we will drop the first 2 attack bitboards
+-- so we will have the pieces which will reach the opponent king (neighbourhood)
+-- in 2, 3, 4 or 5 moves
+
+data KsBB = KsBB !BBoard !BBoard !BBoard !BBoard
+data KsIs = KsIs !Int !Int !Int !Int
+
+-- Compute the bitboard quarter:
+{-# INLINE bbQuarter #-}
+bbQuarter :: (BBoard -> Square -> BBoard) -> BBoard -> BBoard -> BBoard -> KsBB
+bbQuarter f !occ !fbd !tgt = KsBB b0 b1 b2 b3
+    where (b0 : b1 : b2 : b3 : _) = drop 2 $ reach f occ fbd tgt
+
+-- Compute a king safety coefficient for one kind of piece
+-- given the corrsponding bitboard quarter (piece specific, precalculated),
+-- the int quarter (piece specific, eval parameter) and the bitboard
+-- of the piece type in the current position
+ksCoef :: KsBB -> KsIs -> BBoard -> Int
+ksCoef !(KsBB b0 b1 b2 b3) !(KsIs i0 i1 i2 i3) !bb = w
+    where wei b i = popCount (bb .&. b) * i
+          !w = wei b0 i0 + wei b1 i1 + wei b2 i2 + wei b3 i3
+
+ksCoefQueen = KsIs 32 16  8 4
+ksCoefRook  = KsIs 16  8  4 2
+ksCoefMinor = KsIs  8  4  2 1
+
+kingFuture :: MyPos -> IWeights
+kingFuture p = [v]
+    where !v = mv - yv
+          !mv = mq + mr -- + mb + mn
+          !mq | q == 0    = 0
+              | otherwise = ksCoef (bbQuarter qAttacs (occup p) meforb metarg) ksCoefQueen q
+              where q = queens p .&. me p
+          !mr | r == 0    = 0
+              | otherwise = ksCoef (bbQuarter rAttacs (occup p) meforb metarg) ksCoefRook  r
+              where r = rooks p .&. me p
+--          !mb | b == 0    = 0
+--              | otherwise = ksCoef (bbQuarter bAttacs (occup p) meforb metarg) ksCoefMinor b
+--              where b = bishops p .&. me p
+--          !mn | n == 0    = 0
+--              | otherwise = ksCoef (bbQuarter nattacs (occup p) meforb metarg) ksCoefMinor n
+--              where n = knights p .&. me p
+          !meforb = me p .|. yoPAttacs p .|. kings p
+          !metarg = yo p .&. kings p .|. yoKAttacs p
+          !yv = yq + yr -- + yb + yn
+          !yq | q == 0    = 0
+              | otherwise = ksCoef (bbQuarter qAttacs (occup p) yoforb yotarg) ksCoefQueen q
+              where q = queens p .&. yo p
+          !yr | r == 0    = 0
+              | otherwise = ksCoef (bbQuarter rAttacs (occup p) yoforb yotarg) ksCoefRook  r
+              where r = rooks p .&. yo p
+--          !yb | b == 0    = 0
+--              | otherwise = ksCoef (bbQuarter bAttacs (occup p) yoforb yotarg) ksCoefMinor b
+--              where b = bishops p .&. yo p
+--          !yn | n == 0    = 0
+--              | otherwise = ksCoef (bbQuarter nattacs (occup p) yoforb yotarg) ksCoefMinor n
+--              where n = knights p .&. yo p
+          !yoforb = yo p .|. myPAttacs p .|. kings p
+          !yotarg = me p .&. kings p .|. myKAttacs p
+          nattacs _ sq = nAttacs sq
 
 ------ Material ------
 data Material = Material
