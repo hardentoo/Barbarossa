@@ -866,6 +866,14 @@ reserveExtension !uex !exd
         modify $ \s -> s { usedext = usedext s + exd }
         return exd
 
+ttScoreOk :: Int -> Int -> Int -> Int -> Int -> Bool
+ttScoreOk d asco hdeep htp hsco
+    | hdeep  < 0 = False
+    | margin > 0 = htp /= 0 && margin >   ddsco
+    | otherwise  = htp /= 1 && margin < - ddsco
+    where margin = hsco - asco
+          ddsco  = (d - hdeep) * 150
+
 pvInnerLoopExten :: Path -> Int -> Bool -> Int -> NodeState
                  -> Search Path
 pvInnerLoopExten b d spec !exd nst = do
@@ -891,7 +899,7 @@ pvInnerLoopExten b d spec !exd nst = do
         !hsco = - hscore		
         !tp'  = if tp == 2 then 2 else 1-tp
     -- This logic could be done depending on node type?
-    if hdeep >= d' && (tp' == 2 || tp' == 1 && hsco > asco || tp' == 0 && hsco <= asco)
+    if ttScoreOk d' asco hdeep tp' hsco
        then {-# SCC "hashRetrieveScoreOk" #-} do
            let ttpath = Path { pathScore = hsco, pathDepth = hdeep, pathMoves = Seq [e'], pathOrig = "TT" }
            reSucc nodes' >> return ttpath
@@ -960,10 +968,11 @@ pvInnerLoopExtenZ b d spec !exd nst = do
               then {-# SCC "hashRetrieveScore" #-} reTrieve >> lift ttRead
               else return (-1, 0, 0, undefined, 0)
     -- Score and inequality must be inverted
-    let bsco = pathScore b
+    let !asco = pathScore b - 1
         !hsco = - hscore
         !tp' = if tp == 2 then 2 else 1-tp
-    if hdeep >= d' && (tp' == 2 || tp' == 1 && hsco >= bsco || tp' == 0 && hsco < bsco)
+    -- if hdeep >= d' && (tp' == 2 || tp' == 1 && hsco >= bsco || tp' == 0 && hsco < bsco)
+    if ttScoreOk d' asco hdeep tp' hsco
        then {-# SCC "hashRetrieveScoreOk" #-} do
            let ttpath = Path { pathScore = hsco, pathDepth = hdeep, pathMoves = Seq [e'], pathOrig = "TT" }
            reSucc nodes' >> return ttpath	-- !!!
