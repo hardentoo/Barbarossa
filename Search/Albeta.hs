@@ -869,10 +869,12 @@ reserveExtension !uex !exd
 ttScoreOk :: Int -> Int -> Int -> Int -> Int -> Bool
 ttScoreOk d asco hdeep htp hsco
     | hdeep  < 0 = False
-    | margin > 0 = htp /= 0 && margin >   ddsco
-    | otherwise  = htp /= 1 && margin < - ddsco
+    | margin > 0 = htp /= 0 && margin >    ddsco
+    | otherwise  = htp /= 1 && margin <= - ddsco
     where margin = hsco - asco
-          ddsco  = (d - hdeep) * 150
+          ddiff  = d - hdeep
+          ddsco | d <= hdeep = 0
+                | otherwise  = futilMargins $ d - hdeep
 
 pvInnerLoopExten :: Path -> Int -> Bool -> Int -> NodeState
                  -> Search Path
