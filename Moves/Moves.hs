@@ -4,7 +4,7 @@ module Moves.Moves (
     fAttacs,
     pMovs,
     kAttacs, qAttacs, rAttacs, bAttacs, nAttacs,
-    pAll1Moves, pAll2Moves
+    pAll1Moves, pAll2Moves, hasPawn1Push
     ) where
 
 import Data.Array.Base
@@ -149,3 +149,9 @@ fAttacs sq Bishop !oc = bAttacs oc sq
 fAttacs sq Rook   !oc = rAttacs oc sq
 fAttacs sq Queen  !oc = qAttacs oc sq
 fAttacs _  _      _  = 0	-- this would be for pawn, which is calculated different
+
+-- Fast check of some pawn moves
+{-# INLINE hasPawn1Push #-}
+hasPawn1Push :: Color -> BBoard -> BBoard -> Bool
+hasPawn1Push White !pawns !occ = (pawns `unsafeShiftL` 8) `less` occ /= 0
+hasPawn1Push Black !pawns !occ = (pawns `unsafeShiftR` 8) `less` occ /= 0

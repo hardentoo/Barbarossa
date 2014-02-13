@@ -134,13 +134,14 @@ movePassed p m = passed p .&. (uBit $ fromSquare m) /= 0
 -- only a pinned piece: then we are stale mate but don't know (yet)
 -- In the next ply, when we try to find a move, we see that all moves are illegal
 -- In this case we should take care in search that the score is 0!
+{-# INLINE hasMoves #-}
 hasMoves :: MyPos -> Color -> Bool
 hasMoves !p c
-    | chk       = not . null $ genMoveFCheck p
+    | inCheck p = not . null $ genMoveFCheck p
     | otherwise = anyMove
     where hasPc = any (/= 0) $ map (pcapt . pAttacs c)
                      $ bbToSquares $ pawns p .&. me p
-          hasPm = not . null $ pAll1Moves c (pawns p .&. me p) (occup p)
+          hasPm = hasPawn1Push c (pawns p .&. me p) (occup p)
           hasN = any (/= 0) $ map (legmv . nAttacs) $ bbToSquares $ knights p .&. me p
           hasB = any (/= 0) $ map (legmv . bAttacs (occup p))
                      $ bbToSquares $ bishops p .&. me p
@@ -148,13 +149,12 @@ hasMoves !p c
                      $ bbToSquares $ rooks p .&. me p
           hasQ = any (/= 0) $ map (legmv . qAttacs (occup p))
                      $ bbToSquares $ queens p .&. me p
-          !hasK = 0 /= (legal . kAttacs $ firstOne $ kings p .&. me p)
-          !anyMove = hasK || hasN || hasPm || hasPc || hasQ || hasR || hasB
-          chk = inCheck p
-          !yopiep = yo p .|. (epcas p .&. epMask)
+          hasK = 0 /= (legmv . free . kAttacs $ firstOne $ kings p .&. me p)
+          anyMove = hasPm || hasK || hasN || hasPc || hasQ || hasR || hasB
+          yopiep = yo p .|. (epcas p .&. epMask)
           legmv = (`less` me p)
           pcapt = (.&. yopiep)
-          legal = (`less` yoAttacs p)
+          free  = (`less` yoAttacs p)
 
 {--
 -- This one is not used anymore - see genMoveCaptWL
