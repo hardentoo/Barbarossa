@@ -290,11 +290,12 @@ staticVal = do
     s <- get
     t <- getPos
     let !c = moving t
-        !stSc = if not (kingsOk t && checkOk t)
-                   then error $ "Wrong position, pos stack:\n" ++ concatMap showMyPos (stack s)
-                   else staticScore t
-        !stSc1 | check t /= 0 = if hasMoves t c then stSc else -mateScore
-               | otherwise    = stSc
+        -- !stSc | kingsOk t && checkOk t = staticScore t
+        --       | otherwise              = error $ "Wrong position, pos stack:\n"
+        --                                            ++ concatMap showMyPos (stack s)
+        !stSc1 | hasMoves t c = staticScore t
+               | check t /= 0 = -mateScore
+               | otherwise    = 0
     -- when debug $ lift $ ctxLog "Debug" $ "--> staticVal " ++ show stSc1
     return stSc1
 
