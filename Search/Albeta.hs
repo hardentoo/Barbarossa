@@ -665,7 +665,7 @@ pvSearch nst !a !b !d lastnull = do
                 let nst' = if hdeep > 0 && nullSeq (pvcont nst)
                               then nst { pvcont = Seq [e'] }
                               else nst
-                edges <- genAndSort nst0 a b d
+                edges <- genAndSort nst' a b d
                 if noMove edges
                    then do
                      v <- lift staticVal
