@@ -62,7 +62,7 @@ collectEvalParams (s, v) ep = lookApply s v ep [
           setEpPawnBonusScale  v ep = ep { epPawnBonusScale  = round v }
 
 class EvalItem a where
-    evalItem    :: EvalParams -> MyPos -> a -> IWeights
+    evalItem    :: EvalParams -> Int -> MyPos -> a -> IWeights
     evalItemNDL :: a -> [(String, (Double, (Double, Double)))]	-- Name, Default, Limits
 
 -- some handy functions for eval item types:
@@ -190,12 +190,13 @@ evalDispatch p sti
       Just r <- pawnEndGame p = r
     | otherwise    = normalEval p sti
 
-itemEval :: EvalParams -> MyPos -> AnyEvalItem -> [Int]
-itemEval ep p (EvIt a) = evalItem ep p a
+itemEval :: EvalParams -> Int -> MyPos -> AnyEvalItem -> [Int]
+itemEval ep phase p (EvIt a) = evalItem ep phase p a
 
 normalEval :: MyPos -> EvalState -> (Int, [Int])
 normalEval p sti = (sc, feat)
-    where !feat = concatMap (itemEval (esEParams sti) p) evalItems
+    where !phas = gamePhase p
+          !feat = concatMap (itemEval (esEParams sti) phas p) evalItems
           !sc'  = feat <*> esIWeights sti `shiftR` shift2Cp
           !sc   = sc' + meMoving
           meMoving = 5	-- advantage for moving
@@ -234,6 +235,14 @@ evalNoPawns p sti = (sc, zeroFeats)
           minorcnt = popCount1 minor
           major    = queens p .|. rooks p
           majorcnt = popCount1 major
+
+{-# INLINE gamePhase #-}
+gamePhase :: MyPos -> Int
+gamePhase p = ph
+    where !mi = popCount1 $ bishops p .|. knights p
+          !ro = popCount1 $ rooks p
+          !qs = popCount1 $ queens p
+          !ph = 3 * mi + 5 * ro + 8 * qs
 
 winBonus :: Int
 winBonus = 200	-- when it's known win
@@ -301,15 +310,16 @@ zoneAttacs p zone = (m, y)
 data KingSafe = KingSafe
 
 instance EvalItem KingSafe where
-    evalItem _ p _ = kingSafe p
-    evalItemNDL _  = [("kingSafe", (1, (0, 20)))]
+    evalItem _ ph p _ = kingSafe ph p
+    evalItemNDL _     = [("kingSafe", (1, (0, 20)))]
 
 -- Rewrite of king safety taking into account number and quality
 -- of pieces attacking king neighbour squares
 -- This function is almost optimised, it could perhaps be faster
 -- if we eliminate the lists
-kingSafe :: MyPos -> [Int]
-kingSafe !p = [ksafe]
+kingSafe :: Int -> MyPos -> [Int]
+kingSafe ph _ | ph <= 12 = [ 0 ]
+kingSafe _ !p = [ksafe]
     where !ksafe = mattacs - yattacs
           !freem = popCount1 $ myKAttacs p .&. yoAttacs p `less` me p
           !freey = popCount1 $ yoKAttacs p .&. myAttacs p `less` yo p
@@ -350,8 +360,8 @@ kingSquare kingsb colorp = head $ bbToSquares $ kingsb .&. colorp
 data Material = Material
 
 instance EvalItem Material where
-    evalItem _ p _ = materDiff p
-    evalItemNDL _  = [("materialDiff", (8, (8, 8)))]
+    evalItem _ _ p _ = materDiff p
+    evalItemNDL _    = [("materialDiff", (8, (8, 8)))]
 
 materDiff :: MyPos -> IWeights
 materDiff p = [md]
@@ -362,13 +372,13 @@ materDiff p = [md]
 data KingOpen = KingOpen
 
 instance EvalItem KingOpen where
-    evalItem _ p _ = kingOpen p
-    evalItemNDL _  = [ ("kingOpenOwn", (-20, (-48, 1))), ("kingOpenAdv", (20, (0, 32)))] 
+    evalItem _ ph p _ = kingOpen ph p
+    evalItemNDL _     = [ ("kingOpenOwn", (-20, (-48, 1))), ("kingOpenAdv", (20, (0, 32)))] 
 
 -- Openness can be tought only with pawns (like we take) or all pieces
 -- This function is optimized
-kingOpen :: MyPos -> IWeights
-kingOpen p = [own, adv]
+kingOpen :: Int -> MyPos -> IWeights
+kingOpen ph p = [own, adv]
     where mopbishops = popCount1 $ bishops p .&. yo p
           moprooks   = popCount1 $ rooks p .&. yo p
           mopqueens  = popCount1 $ queens p .&. yo p
@@ -382,16 +392,17 @@ kingOpen p = [own, adv]
           paw = pawns p
           msq = kingSquare (kings p) $ me p
           ysq = kingSquare (kings p) $ yo p
-          comb !oB !oR !oQ !wb !wr = let !v = oB * wb + oR * wr + oQ * (wb + wr) in v
+          comb !oB !oR !oQ !wb !wr = let !v = oB * wb + oR * wr + oQ * (wb + wr) in v * ph `div` 60
           !own = comb mopbishops moprooks mopqueens mwb mwr
           !adv = comb yopbishops yoprooks yopqueens ywb ywr
 
+{--
 ------ King on a center file ------
 data KingCenter = KingCenter
 
 instance EvalItem KingCenter where
-    evalItem _ p _ = kingCenter p
-    evalItemNDL _  = [ ("kingCenter", (-120, (-200, 0))) ]
+    evalItem _ ph p _ = kingCenter ph p
+    evalItemNDL _     = [ ("kingCenter", (-120, (-200, 0))) ]
 
 -- This function is optimised
 kingCenter :: MyPos -> IWeights
@@ -404,12 +415,13 @@ kingCenter p = [ kcd ]
           !wqueens = popCount1 $ queens p .&. me p
           !brooks  = popCount1 $ rooks  p .&. yo p
           !bqueens = popCount1 $ queens p .&. yo p
+--}
 
 ------ King placement ------
 data KingPlace = KingPlace
 
 instance EvalItem KingPlace where
-    evalItem ep p _  = kingPlace ep p
+    evalItem ep _ p _  = kingPlace ep p
     evalItemNDL _ = [
                       ("kingPlaceCent", (4, (0, 400))),
                       ("kingPlacePwns", (4, (0, 400)))
@@ -419,6 +431,7 @@ instance EvalItem KingPlace where
 -- Depending on which pieces are on the board we have some preferences
 -- where the king should be placed. For example, in the opening and middle game it should
 -- be in some corner, in endgame it should be near some (passed) pawn(s)
+-- This should be rewritten in terms of game phase!
 kingPlace :: EvalParams -> MyPos -> IWeights
 kingPlace ep p = [ kcd, kpd ]
     where !kcd = mpl - ypl
@@ -541,7 +554,7 @@ proxyLine line sq = proxyBonusArr `unsafeAt` (unsafeShiftR sq 3 - line)
 data Mobility = Mobility	-- "safe" moves
 
 instance EvalItem Mobility where
-    evalItem _ p _ = mobDiff p
+    evalItem _ _ p _ = mobDiff p
     evalItemNDL _  = [ ("mobilityKnight", (72, (60, 100))),
                        ("mobilityBishop", (72, (60, 100))),
                        ("mobilityRook", (48, (40, 100))),
@@ -571,7 +584,7 @@ mobDiff p = [n, b, r, q]
 data Center = Center
 
 instance EvalItem Center where
-    evalItem _ p _ = centerDiff p
+    evalItem _ _ p _ = centerDiff p
     evalItemNDL _  = [("centerAttacs", (72, (50, 100)))]
 
 -- This function is already optimised
@@ -635,7 +648,7 @@ centerDiff p = [wb]
 data LastLine = LastLine
 
 instance EvalItem LastLine where
-    evalItem _ p _ = lastline p
+    evalItem _ _ p _ = lastline p
     evalItemNDL _  = [("lastLinePenalty", (8, (0, 24)))]
 
 -- This function is already optimised
@@ -663,7 +676,7 @@ lastline p = [cdiff]
 data Redundance = Redundance
 
 instance EvalItem Redundance where
-    evalItem _ p _ = evalRedundance p
+    evalItem _ _ p _ = evalRedundance p
     evalItemNDL _  = [("bishopPair",       (320,  (100, 400))),
                       ("redundanceRook",   (-104,  (-150, 0))) ]
 
@@ -687,7 +700,7 @@ evalRedundance p = [bp, rr]
 data NRCorrection = NRCorrection
 
 instance EvalItem NRCorrection where
-    evalItem _ p _ = evalNRCorrection p
+    evalItem _ _ p _ = evalNRCorrection p
     evalItemNDL _  = [("nrCorrection", (0, (0, 8)))]
 
 -- This function seems to be already optimised
@@ -705,7 +718,7 @@ evalNRCorrection p = [md]
 data RookPawn = RookPawn
 
 instance EvalItem RookPawn where
-    evalItem _ p _ = evalRookPawn p
+    evalItem _ _ p _ = evalRookPawn p
     evalItemNDL _  = [("rookPawn", (-64, (-120, 0))) ]
 
 -- This function is already optimised
@@ -719,7 +732,7 @@ evalRookPawn p = [rps]
 data PassPawns = PassPawns
 
 instance EvalItem PassPawns where
-    evalItem _ p _ = passPawns p
+    evalItem _ ph p _ = passPawns ph p
     evalItemNDL _  = [("passPawnBonus", (104,  (   0,  160))),
                       ("passPawn4",     (424,  ( 400,  480))),
                       ("passPawn5",     (520,  ( 520,  640))),
@@ -727,8 +740,9 @@ instance EvalItem PassPawns where
                       ("passPawn7",     (1920, (1600, 2300)))
                      ]
  
-passPawns :: MyPos -> IWeights
-passPawns p = [dfp, dfp4, dfp5, dfp6, dfp7]
+-- Rewrite it with game phase!
+passPawns :: Int -> MyPos -> IWeights
+passPawns ph p = [dfp, dfp4, dfp5, dfp6, dfp7]
     where !mfpbb = passed p .&. me p
           !yfpbb = passed p .&. yo p
           !mfp  = popCount1   mfpbb
