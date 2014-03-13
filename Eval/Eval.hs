@@ -11,8 +11,9 @@ module Eval.Eval (
     weightNames, weightLims, parDim, weightPairs
 ) where
 
-import Prelude hiding ((++), head, foldl, map, concat, filter, takeWhile, iterate, sum, minimum,
-                       zip, zipWith, foldr, concatMap, length, replicate, lookup, repeat, null)
+import Prelude hiding ((++), head, foldl, map, concat, filter, takeWhile, iterate, sum,
+                       minimum, zip, zipWith, foldr, concatMap, length, replicate, lookup,
+                       repeat, null, take)
 import Data.Array.Base (unsafeAt)
 import Data.Bits hiding (popCount)
 import Data.List.Stream
@@ -188,24 +189,28 @@ evalDispatch p sti
       pawns p .&. yo p == 0 = evalSideNoPawns p sti
     | kings p .|. pawns p == occup p,
       Just r <- pawnEndGame p = r
-    | otherwise    = normalEval p sti
+    | otherwise    = normalEval p sti False
 
 itemEval :: EvalParams -> Int -> MyPos -> AnyEvalItem -> [Int]
 itemEval ep phase p (EvIt a) = evalItem ep phase p a
 
-normalEval :: MyPos -> EvalState -> (Int, [Int])
-normalEval p sti = (sc, feat)
+normalEval :: MyPos -> EvalState -> Bool -> (Int, [Int])
+normalEval p sti half
+    | half && sc > -rook && sc < rook = (sc2, feat)
+    | otherwise                       = (sc,  feat)
     where !phas = gamePhase p
           !feat = concatMap (itemEval (esEParams sti) phas p) evalItems
           !sc'  = feat <*> esIWeights sti `shiftR` shift2Cp
           !sc   = sc' + meMoving
+          !sc2  = sc `div` 2
           meMoving = 5	-- advantage for moving
+          rook  = 550
 
 evalSideNoPawns :: MyPos -> EvalState -> (Int, [Int])
 evalSideNoPawns p sti
-    | npwin && insufficient = (0, zeroFeats)
+    | insufficient && npwin = (0, zeroFeats)
     | otherwise             = (nsc, feats)
-    where (nsc, feats) = normalEval p sti
+    where (nsc, feats) = normalEval p sti False
           npside = if pawns p .&. me p == 0 then me p else yo p
           npwin = npside == me p && nsc > 0 || npside == yo p && nsc < 0
           insufficient = majorcnt == 0 && (minorcnt == 1 || minorcnt == 2 && bishopcnt == 0)
@@ -222,7 +227,7 @@ evalNoPawns p sti = (sc, zeroFeats)
               | kbnk        = mateKBNK p kaloneyo	-- bishop + knight
               | kMxk        = mateKMajxK p kaloneyo	-- simple mate with at least one major
               -- | kqkx        = mateQRest p kaloneb	-- queen against minor or rook
-              | otherwise   = fst $ normalEval p sti
+              | otherwise   = fst $ normalEval p sti True
           kaloneme = me p `less` kings p == 0
           kaloneyo = yo p `less` kings p == 0
           onlykings = kaloneme && kaloneyo
@@ -421,10 +426,10 @@ kingCenter p = [ kcd ]
 data KingPlace = KingPlace
 
 instance EvalItem KingPlace where
-    evalItem ep _ p _  = kingPlace ep p
+    evalItem ep ph p _  = kingPlace ep ph p
     evalItemNDL _ = [
                       ("kingPlaceCent", (4, (0, 400))),
-                      ("kingPlacePwns", (4, (0, 400)))
+                      ("kingPlacePwns", (8, (0, 400)))
                     ]
 
 
@@ -432,24 +437,20 @@ instance EvalItem KingPlace where
 -- where the king should be placed. For example, in the opening and middle game it should
 -- be in some corner, in endgame it should be near some (passed) pawn(s)
 -- This should be rewritten in terms of game phase!
-kingPlace :: EvalParams -> MyPos -> IWeights
-kingPlace ep p = [ kcd, kpd ]
+kingPlace :: EvalParams -> Int -> MyPos -> IWeights
+kingPlace ep ph p = [ kcd, kpd ]
     where !kcd = mpl - ypl
-          !kpd = 0	-- mpi - ypi
+          !kpd = ypi - mpi
           !mks = kingSquare (kings p) $ me p
           !yks = kingSquare (kings p) $ yo p
           !mkm = materFun yminor yrooks yqueens
           !ykm = materFun mminor mrooks mqueens
           !mpl = kingMaterBonus mpawns mro mkm mks `unsafeShiftR` epMaterBonusScale ep
           !ypl = kingMaterBonus ypawns yro ykm yks `unsafeShiftR` epMaterBonusScale ep
-          {--
-          !mpi | passed p /= 0            = kingPawnsBonus c mks (passed p) mpassed ypassed
-               | mkm <= 0 && pawns p /= 0 = kingPawnsBonus c mks (pawns  p) mpawns  ypawns
-               | otherwise                = 0
-          !ypi | passed p /= 0            = kingPawnsBonus c yks (passed p) mpassed ypassed
-               | ykm <= 0 && pawns p /= 0 = kingPawnsBonus c yks (pawns  p) mpawns  ypawns
-               | otherwise                = 0
-          --}
+          !mpi | ph >= 20  = 0
+               | otherwise = kingPawnsMalus c         mks (pawns p) mpassed ypassed ph
+          !ypi | ph >= 20  = 0
+               | otherwise = kingPawnsMalus (other c) yks (pawns p) mpassed ypassed ph
           !mro     = rooks p .&. me p
           !mrooks  = popCount1 mro
           !mqueens = popCount1 $ queens p .&. me p
@@ -460,9 +461,9 @@ kingPlace ep p = [ kcd, kpd ]
           !yminor  = popCount1 $ (bishops p .|. knights p) .&. yo p
           !mpawns  = pawns p .&. me p
           !ypawns  = pawns p .&. yo p
-          -- !mpassed = passed p .&. me p
-          -- !ypassed = passed p .&. yo p
-          -- !c = moving p
+          !mpassed = passed p .&. me p
+          !ypassed = passed p .&. yo p
+          !c = moving p
           materFun m r q = (m * epMaterMinor ep + r * epMaterRook ep + q * epMaterQueen ep)
                                `unsafeShiftR` epMaterScale ep
 
@@ -470,27 +471,22 @@ promoW, promoB :: Square -> Square
 promoW s = 56 + (s .&. 7)
 promoB s =       s .&. 7
 
-{--
--- We give bonus also for pawn promotion squares, if the pawn is near enough to promote
--- Give as parameter bitboards for all pawns, white pawns and black pawns for performance
-kingPawnsBonus :: Color -> Square -> BBoard -> BBoard -> BBoard -> Int
-kingPawnsBonus White !ksq !alp !mbb !ybb = kingPawnsBonus' ksq alp wHalf bHalf
-    where !wHalf = 0x00000000FFFFFFFF .&. ybb
-          !bHalf = 0xFFFFFFFF00000000 .&. mbb
-kingPawnsBonus Black !ksq !alp !mbb !ybb = kingPawnsBonus' ksq alp wHalf bHalf
-    where !wHalf = 0x00000000FFFFFFFF .&. mbb
-          !bHalf = 0xFFFFFFFF00000000 .&. ybb
+-- We want that the king is near the pawns in the endgame, and for passed pawns also near
+-- the promoting square. We cannot be near all pawns, so we choose the next few pawns
+-- and give a malus in form of the sum of square of distances to them
+kingPawnsMalus :: Color -> Square -> BBoard -> BBoard -> BBoard -> Int -> Int
+kingPawnsMalus White !ksq !alp !mbb !ybb !ph = kingPawnsMalus' ksq alp mbb ybb ph
+kingPawnsMalus Black !ksq !alp !mbb !ybb !ph = kingPawnsMalus' ksq alp ybb mbb ph
 
-promoFieldDistIncr :: Int -> Int
-promoFieldDistIncr = \d -> d + 1
-
-kingPawnsBonus' :: Square -> BBoard -> BBoard -> BBoard -> Int
-kingPawnsBonus' !ksq !alp !wHalf !bHalf = bonus
-    where !bpsqs = sum $ map (proxyBonus . squareDistance ksq) $ bbToSquares alp
-          !bqsqs = sum $ map (proxyBonus . promoFieldDistIncr . squareDistance ksq)
-                       $ map promoW (bbToSquares bHalf) ++ map promoB (bbToSquares wHalf)
-          !bonus = (bpsqs + bqsqs) `unsafeShiftR` pawnBonusScale
---}
+kingPawnsMalus' :: Square -> BBoard -> BBoard -> BBoard -> Int -> Int
+kingPawnsMalus' !ksq !alp !wpass !bpass !ph = malus
+    where sqsqds = sort $ map (squareDistance ksq)
+                        $    bbToSquares alp
+                          ++ map promoW (bbToSquares wpass)
+                          ++ map promoB (bbToSquares bpass)
+          !slen  = length sqsqds
+          !ssum  = sum $ take (slen `unsafeShiftR` 1) sqsqds
+          !malus = ssum * ssum `div` (ph + 1)
 
 -- This is a bonus for the king beeing near one corner
 -- It's bigger when the enemy has more material (only pieces)
