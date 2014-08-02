@@ -741,7 +741,7 @@ data PawnMo = PawnMo
 
 instance EvalItem PawnMo where
     evalItem _ p _ = pawnMo p
-    evalItemNDL _  = [("pawnMobility", ((29, 182), (0, 200)))]
+    evalItemNDL _  = [("pawnMobility", ((20, 240), (-30, 500)))]
 
 pawnMo :: MyPos -> IWeights
 pawnMo p
