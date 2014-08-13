@@ -13,7 +13,7 @@ module Eval.Eval (
 
 import Prelude hiding ((++), head, foldl, map, concat, filter, takeWhile, iterate, sum, minimum,
                        zip, zipWith, foldr, concatMap, length, replicate, lookup, repeat, null,
-                       unzip, drop)
+                       unzip, drop, zip3)
 import Data.Array.Base (unsafeAt)
 import Data.Bits hiding (popCount)
 import Data.List.Stream
@@ -174,10 +174,6 @@ inLimits :: Limits -> (DWeights, DWeights) -> (DWeights, DWeights)
 inLimits ls (psm, pse) = (map inlim $ zip ls psm, map inlim $ zip ls pse)
     where inlim ((mi, ma), p) = max mi $ min ma p
 
-(<*>) :: Num a => [a] -> [a] -> a
-a <*> b = sum $ zipWith (*) a b
-{-# SPECIALIZE (<*>) :: [Int] -> [Int] -> Int #-}
-
 matesc :: Int
 matesc = 20000 - 255	-- warning, this is also defined in Base.hs!!
 
@@ -203,14 +199,24 @@ itemEval ep p (EvIt a) = evalItem ep p a
 
 normalEval :: MyPos -> EvalState -> (Int, [Int])
 normalEval p !sti = (sc, feat)
-    where feat = concatMap (itemEval (esEParams sti) p) evalItems
-          scm  = feat <*> esIWeightsM sti
-          sce  = feat <*> esIWeightsE sti
-          gph  = gamePhase p
-          !sc = ((scm + meMovingMid) * gph + (sce + meMovingEnd) * (256 - gph)) `unsafeShiftR` nm
+    where Pair scm sce = weightMidEnd inip (esIWeightsM sti) (esIWeightsE sti) feat
+          feat = concatMap (itemEval (esEParams sti) p) evalItems
+          inip = Pair meMovingMid meMovingEnd
+          gph  = gamePhase p	-- could compute this incrementally
+          !sc = (scm * gph + sce * (256 - gph)) `unsafeShiftR` nm
+          -- Why not make these as parameter and optimise? (directly in 1/8 cp)
           meMovingMid = 15 `shiftL` shift2Cp	-- advantage for moving in mid game
           meMovingEnd =  5 `shiftL` shift2Cp	-- advantage for moving in end game
           nm = shift2Cp + 8
+
+-- Strict data structure and function to calculate the weighted sum of features
+-- for mid game end end game weights in only one pass
+data Pair = Pair !Int !Int
+
+{-# INLINE weightMidEnd #-}
+weightMidEnd :: Pair -> [Int] -> [Int] -> [Int] -> Pair
+weightMidEnd acc mws ews fs = foldr g acc $ zip3 mws ews fs
+    where g (mw, ew, f) (Pair m e) = Pair (m + mw * f) (e + ew * f)
 
 gamePhase :: MyPos -> Int
 gamePhase p = g
