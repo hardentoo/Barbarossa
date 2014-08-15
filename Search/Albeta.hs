@@ -111,6 +111,10 @@ futilMv = 150	-- suplementary margin for every further depth
 futilMargins :: Int -> Int
 futilMargins d = futilMs - futilMv + d*futilMv
 
+-- Parameters for hopeless
+hlessLimit :: Int
+hlessLimit = -2400	-- 3x800 means we are 3 plys under one queen back
+
 -- Parameters for quiescent search:
 qsBetaCut, qsDeltaCut :: Bool
 qsBetaCut  = True	-- use beta cut in QS?
@@ -188,6 +192,7 @@ data NodeState
           ronly :: !PVReadOnly,	-- read only parameters
           absdp :: !Int,	-- absolute depth (root = 0)
           usext :: !Int,	-- used extension
+          scxpl :: !Int,	-- sum of scores along the plys, for hopeless
           crtnt :: !NodeType,	-- parent node type (actually expected)
           nxtnt :: !NodeType,	-- expected child node type
           cursc :: !Path,	-- current alpha value (now plus path & depth)
@@ -302,7 +307,7 @@ pvsInit :: PVState
 pvsInit = PVState { abort = False, short = False, stats = stt0 }
 
 nst0 :: NodeState
-nst0 = NSt { ronly = pvro00, absdp = 0, usext = 0,
+nst0 = NSt { ronly = pvro00, absdp = 0, usext = 0, scxpl = 0,
              crtnt = PVNode, nxtnt = PVNode, cursc = pathFromScore "Zero" 0,
              movno = 1, killer = NoKiller, pvsl = [], pvcont = emptySeq }
 
@@ -724,10 +729,12 @@ pvZeroW !nst !b !d !lastnull redu = do
                      prune <- if not futilActive
                                  then return False
                                  else isPruneFutil d bGrain	-- was a
+                     stsc <- lift $ staticVal
+                     let xpl = - scxpl nst + stsc	-- the hopeless value
                      -- Loop thru the moves
                      let !nsti = nst0 { ronly = ronly nst, crtnt = nxtnt nst',
                                         nxtnt = deepNodeType (nxtnt nst'),
-                                        cursc = bGrain, pvcont = tailSeq (pvcont nst') }
+                                        scxpl = xpl, cursc = bGrain, pvcont = tailSeq (pvcont nst') }
                      nstf <- pvZLoop b d prune redu nsti edges
                      let s = cursc nstf
                      -- Here we expect bGrain <= s < b -- this must be checked
@@ -766,7 +773,8 @@ nullEdgeFailsHigh nst b d lastnull
                       nn <- newNode
                       viztreeDown0 nn
                       viztreeABD (pathScore negnmb) (pathScore negnma) d1
-                      val <- fmap pnextlev $ pvZeroW nst { pvcont = emptySeq } negnma d1 lastnull1 True
+                      let nst' = nst { pvcont = emptySeq, absdp = absdp nst + 1 }
+                      val <- fmap pnextlev $ pvZeroW nst' negnma d1 lastnull1 True
                       lift undoMove	-- undo null move
                       viztreeUp0 nn (pathScore val)
                       return $! val >= nmb
@@ -815,8 +823,9 @@ pvInnerLoop b d prune nst e = do
                 nn <- newNode
                 viztreeDown nn e
                 s <- case exd of
-                         Exten exd' spc -> do
-                           if prune && exd' == 0 && not spc -- don't prune special or extended
+                         Exten exd' spc ->
+                           if exd' == 0 && not spc -- don't prune special or extended
+                              && (prune || scxpl nst < hlessLimit)
                               then return $! onlyScore $! cursc nst	-- prune, return a
                               else pvInnerLoopExten b d spc exd' nst
                          Final sco -> do
@@ -851,8 +860,9 @@ pvInnerLoopZ b d prune nst e redu = do
                 nn <- newNode
                 viztreeDown nn e
                 s <- case exd of
-                         Exten exd' spc -> do
-                           if prune && exd' == 0 && not spc -- don't prune special or extended
+                         Exten exd' spc ->
+                           if exd' == 0 && not spc -- don't prune special or extended
+                              && (prune || scxpl nst < hlessLimit)
                               then return $! onlyScore $! cursc nst	-- prune, return a
                               else pvInnerLoopExtenZ b d spc exd' nst redu
                          Final sco -> do
