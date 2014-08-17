@@ -112,8 +112,9 @@ futilMargins :: Int -> Int
 futilMargins d = futilMs - futilMv + d*futilMv
 
 -- Parameters for hopeless
-hlessLimit :: Int
-hlessLimit = -2400	-- 3x800 means we are 3 plys under one queen back
+hlessNeg, hlessPos :: Int
+hlessNeg = -2400	-- 3x800 means we are 3 plys under one queen back
+hlessPos = 2400
 
 -- Parameters for quiescent search:
 qsBetaCut, qsDeltaCut :: Bool
@@ -648,8 +649,8 @@ pvSearch nst !a !b !d = do
                 return s	-- shouldn't we ttStore this?
               else do
                 nodes0 <- gets (sNodes . stats)
-                stsc <- lift $ staticVal
-                let xpl = - scxpl nst + stsc	-- the hopeless value
+                stsc <- lift materVal
+                let xpl = - scxpl nst' + stsc	-- the hopeless value
                 -- Loop thru the moves
                 let !nsti = nst' { scxpl = xpl, crtnt = PVNode, nxtnt = PVNode,
                                    cursc = a, pvcont = tailSeq (pvcont nst'),
@@ -727,36 +728,41 @@ pvZeroW !nst !b !d !lastnull redu = do
                      pindent $ "<= " ++ show s
                      return s	-- shouldn't we ttStore this?
                    else do
-                     !nodes0 <- gets (sNodes . stats)
-                     -- futility pruning?
-                     prune <- if not futilActive
-                                 then return False
-                                 else isPruneFutil d bGrain	-- was a
-                     stsc <- lift $ staticVal
+                     stsc <- lift materVal
                      let xpl = - scxpl nst + stsc	-- the hopeless value
-                     -- Loop thru the moves
-                     let !nsti = nst' { crtnt = nxtnt nst', nxtnt = deepNodeType (nxtnt nst'),
-                                        scxpl = xpl, cursc = bGrain, movno = 1, killer = NoKiller,
-                                        pvcont = tailSeq (pvcont nst') }
-                     nstf <- pvZLoop b d prune redu nsti edges
-                     let s = cursc nstf
-                     -- Here we expect bGrain <= s < b -- this must be checked
-                     pindent $ "<: " ++ show s
-                     let !de = max d $ pathDepth s
-                         es = unalt edges
-                     when (de >= minToStore && s < b) $ do	-- we failed low
-                         !nodes1 <- gets (sNodes . stats)
-                         -- store as upper score, and as move the first one (generated)
-                         lift $ do
-                             let typ = 0
-                                 !deltan = nodes1 - nodes0
-                             ttStore de typ (pathScore b) (head es) deltan
-                     if s > bGrain || movno nstf > 1
-                        then return s
-                        else do	-- here: store exact mate or stalemate score!
-                            chk <- lift tacticalPos
-                            let s' = if chk then matedPath else staleMate
-                            return $! trimaxPath bGrain b s'
+                     if xpl < hlessNeg
+                        then return bGrain
+                        else if xpl >= hlessPos
+                                then return b
+                                else do
+                                    !nodes0 <- gets (sNodes . stats)
+                                    -- futility pruning?
+                                    prune <- if not futilActive
+                                                then return False
+                                                else isPruneFutil d bGrain	-- was a
+                                    -- Loop thru the moves
+                                    let !nsti = nst' { crtnt = nxtnt nst', nxtnt = deepNodeType (nxtnt nst'),
+                                                       scxpl = xpl, cursc = bGrain, movno = 1, killer = NoKiller,
+                                                       pvcont = tailSeq (pvcont nst') }
+                                    nstf <- pvZLoop b d prune redu nsti edges
+                                    let s = cursc nstf
+                                    -- Here we expect bGrain <= s < b -- this must be checked
+                                    pindent $ "<: " ++ show s
+                                    let !de = max d $ pathDepth s
+                                        es = unalt edges
+                                    when (de >= minToStore && s < b) $ do	-- we failed low
+                                        !nodes1 <- gets (sNodes . stats)
+                                        -- store as upper score, and as move the first one (generated)
+                                        lift $ do
+                                            let typ = 0
+                                                !deltan = nodes1 - nodes0
+                                            ttStore de typ (pathScore b) (head es) deltan
+                                    if s > bGrain || movno nstf > 1
+                                       then return s
+                                       else do	-- here: store exact mate or stalemate score!
+                                           chk <- lift tacticalPos
+                                           let s' = if chk then matedPath else staleMate
+                                           return $! trimaxPath bGrain b s'
     where bGrain = b -: scoreGrain
 
 nullEdgeFailsHigh :: NodeState -> Path -> Int -> Int -> Search Bool
@@ -828,7 +834,7 @@ pvInnerLoop b d prune nst e = do
                 s <- case exd of
                          Exten exd' spc ->
                            if exd' == 0 && not spc -- don't prune special or extended
-                              && (prune || scxpl nst < hlessLimit)
+                              && prune
                               then return $! onlyScore $! cursc nst	-- prune, return a
                               else pvInnerLoopExten b d spc exd' nst
                          Final sco -> do
@@ -865,7 +871,7 @@ pvInnerLoopZ b d prune nst e redu = do
                 s <- case exd of
                          Exten exd' spc ->
                            if exd' == 0 && not spc -- don't prune special or extended
-                              && (prune || scxpl nst < hlessLimit)
+                              && prune
                               then return $! onlyScore $! cursc nst	-- prune, return a
                               else pvInnerLoopExtenZ b d spc exd' nst redu
                          Final sco -> do
