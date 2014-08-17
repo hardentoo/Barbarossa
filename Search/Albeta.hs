@@ -648,9 +648,12 @@ pvSearch nst !a !b !d = do
                 return s	-- shouldn't we ttStore this?
               else do
                 nodes0 <- gets (sNodes . stats)
+                stsc <- lift $ staticVal
+                let xpl = - scxpl nst + stsc	-- the hopeless value
                 -- Loop thru the moves
-                let !nsti = nst0 { ronly = ronly nst, crtnt = PVNode, nxtnt = PVNode,
-                                   cursc = a, pvcont = tailSeq (pvcont nst') }
+                let !nsti = nst' { scxpl = xpl, crtnt = PVNode, nxtnt = PVNode,
+                                   cursc = a, pvcont = tailSeq (pvcont nst'),
+                                   movno = 1, killer = NoKiller }
                 nstf <- pvSLoop b d False nsti edges
                 let s = cursc nstf
                 pindent $ "<= " ++ show s
@@ -732,9 +735,9 @@ pvZeroW !nst !b !d !lastnull redu = do
                      stsc <- lift $ staticVal
                      let xpl = - scxpl nst + stsc	-- the hopeless value
                      -- Loop thru the moves
-                     let !nsti = nst0 { ronly = ronly nst, crtnt = nxtnt nst',
-                                        nxtnt = deepNodeType (nxtnt nst'),
-                                        scxpl = xpl, cursc = bGrain, pvcont = tailSeq (pvcont nst') }
+                     let !nsti = nst' { crtnt = nxtnt nst', nxtnt = deepNodeType (nxtnt nst'),
+                                        scxpl = xpl, cursc = bGrain, movno = 1, killer = NoKiller,
+                                        pvcont = tailSeq (pvcont nst') }
                      nstf <- pvZLoop b d prune redu nsti edges
                      let s = cursc nstf
                      -- Here we expect bGrain <= s < b -- this must be checked
