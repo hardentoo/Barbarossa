@@ -21,16 +21,12 @@ newHist :: IO History
 newHist = V.replicate vsize 0
 
 histw :: Int -> Int
-histw !d = 1 `unsafeShiftL` dm
-    where !dm = maxd - d
+histw = unsafeShiftL hv
+    where hv = 1 `unsafeShiftL` (maxd + 1)
           maxd = 20
 
-toHist :: History -> Bool -> Square -> Square -> Int -> IO ()
-toHist h True  f t d = addHist h (adr f t) (histw d)
-toHist h False f t d = subHist h (adr f t) (histw d)
-
-valHist :: History -> Square -> Square -> Int -> IO Int
-valHist !h !f !t _ = V.unsafeRead h $! adr f t
+toHist :: History -> Square -> Square -> Int -> IO ()
+toHist h f t = addHist h (adr f t) . histw
 
 addHist :: History -> Int -> Int -> IO ()
 addHist h !ad !p = do
@@ -41,11 +37,5 @@ addHist h !ad !p = do
     where lowLimit = -1000000000
           lowHalf  =  -500000000
 
-subHist :: History -> Int -> Int -> IO ()
-subHist h !ad !p = do
-    a <- V.unsafeRead h ad
-    let !u = a + p	-- trick here: we add, so that the sort is big to small
-        !v = if u > higLimit then higHalf else u
-    V.unsafeWrite h ad v
-    where higLimit = 1000000000
-          higHalf  =  500000000
+valHist :: History -> Square -> Square -> IO Int
+valHist !h !f !t = V.unsafeRead h $! adr f t

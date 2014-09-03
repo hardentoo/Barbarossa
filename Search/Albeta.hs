@@ -16,7 +16,6 @@ import Data.List (delete, sortBy)
 import Data.Ord (comparing)
 import Data.Array.Base
 import Data.Maybe (fromMaybe)
--- import Control.Applicative ((<$>))
 
 import Search.CStateMonad
 import Search.AlbetaTypes
@@ -53,12 +52,10 @@ useAspirWin = False
 -- a33 = 100, 20, 4	-> elo   0 +- 58
 
 -- Some fix search parameter
-scoreGrain, depthForCM, minToStore, minToRetr, maxDepthExt, negHistMNo :: Int
+scoreGrain, depthForCM, maxDepthExt, negHistMNo :: Int
 useNegHist, useTTinPv :: Bool
 scoreGrain  = 4	-- score granularity
 depthForCM  = 7 -- from this depth inform current move
-minToStore  = 1 -- minimum remaining depth to store the position in hash
-minToRetr   = 1 -- minimum remaining depth to retrieve
 maxDepthExt = 3 -- maximum depth extension
 useNegHist  = False	-- when not cutting - negative history
 negHistMNo  = 1		-- how many moves get negative history
@@ -68,24 +65,6 @@ useTTinPv   = False	-- retrieve from TT in PV?
 lmrActive, lmrDebug :: Bool
 lmrActive   = True
 lmrDebug    = False
-
-lmrMaxDepth, lmrMaxWidth :: Int
-lmrMaxDepth = 15
-lmrMaxWidth = 63
-lmrPv, lmrRest :: Double
-lmrPv     = 13
-lmrRest   = 8
--- LMR parameter optimisation (lmrPv, lmrRest):
--- lm1 = 2, 1	-> elo -127 +- 58
--- lm2 = 3, 2	-> elo  -14 +- 52
--- lm3 = 5, 3	-> elo   17 +- 55
--- lm4 = 8, 5	-> elo   32 +- 53
--- lm5 = 13, 8	-> elo   92 +- 54 --> this is it
-lmrReducePv, lmrReduceArr :: UArray (Int, Int) Int
-lmrReducePv  = array ((1, 1), (lmrMaxDepth, lmrMaxWidth))
-    [((i, j), ceiling $ logrd i j lmrPv) | i <- [1..lmrMaxDepth], j <- [1..lmrMaxWidth]]
-lmrReduceArr = array ((1, 1), (lmrMaxDepth, lmrMaxWidth))
-    [((i, j), ceiling $ logrd i j lmrRest) | i <- [1..lmrMaxDepth], j <- [1..lmrMaxWidth]]
 
 logrd :: Int -> Int -> Double -> Double
 logrd i j f = log (fromIntegral i) * log (fromIntegral j) / f
@@ -527,7 +506,7 @@ checkFailOrPVRoot xstats b d e s nst =  do
          if d == 1
             then  do
                  let typ = 2
-                 when (de >= minToStore) $ lift $  ttStore de typ (pathScore s) e nodes'
+                 lift $ ttStore de typ (pathScore s) e nodes'
                  let xpvslg = if s > a
                                  then insertToPvs d pvg (pvsl nst)	-- the good
                                  else insertToPvs d pvb (pvsl nst)	-- the bad (when aspiration)
@@ -548,10 +527,9 @@ checkFailOrPVRoot xstats b d e s nst =  do
                       then do
                         -- what when a root move fails high? We are in aspiration
                         lift $ do
-                            when (de >= minToStore) $ do
-                                let typ = 1	-- beta cut (score is lower limit) with move e
-                                ttStore de typ (pathScore b) e nodes'
-                            betaCut True d (absdp sst) e
+                            let typ = 1	-- beta cut (score is lower limit) with move e
+                            ttStore de typ (pathScore b) e nodes'
+                            betaCut (absdp sst) e
                         let xpvslg = insertToPvs d pvg (pvsl nst)	-- the good
                             !csc = if s > b then combinePath s b else bestPath s b
                         pindent $ "beta cut: " ++ show csc
@@ -561,7 +539,7 @@ checkFailOrPVRoot xstats b d e s nst =  do
                         let sc = pathScore s
                             pa = unseq $ pathMoves s
                         informBest (scoreToExtern sc de) (draft $ ronly sst) pa
-                        when (de >= minToStore) $ lift $ do
+                        lift $ do
                             let typ = 2	-- best move so far (score is exact)
                             ttStore de typ sc e nodes'
                         let xpvslg = insertToPvs d pvg (pvsl nst)	-- the good
@@ -597,11 +575,7 @@ mustQSearch !a !b = do
 -- PV Search
 pvSearch :: NodeState -> Path -> Path -> Int -> Search Path
 pvSearch _ !a !b !d | d <= 0 = do
-    -- Now that we moved the ttRead call under pvSearch we are not prepared
-    -- to handle correctly the case minToRetr = 0
     (v, ns) <- mustQSearch (pathScore a) (pathScore b)
-    when (minToStore == 0)
-        $ lift $  ttStore 0 2 v (Move 0) ns
     let !esc = pathFromScore ("pvQSearch 1:" ++ show v) v
     pindent $ "<> " ++ show esc
     return esc
@@ -611,10 +585,7 @@ pvSearch nst !a !b !d = do
     -- Here we are always in PV:
     when (not inPv) $ lift $ absurd $ "pvSearch not inPv, nst = " ++ show nst
     -- Check first for a TT entry of the position to search
-    (hdeep, tp, hsc, e', nodes')
-        <- if d >= minToRetr
-              then reTrieve >> lift ttRead
-              else return (-1, 0, 0, undefined, 0)
+    (hdeep, tp, hsc, e', nodes') <- reTrieve >> lift ttRead
     -- tp == 1 => score >= hsc, so if hsc >= asco then we improved,
     --    but can we use hsc in PV? This score is not exact!
     --    Idea: return only if better than beta, else search for exact score
@@ -659,7 +630,7 @@ pvSearch nst !a !b !d = do
                        -- here we failed low
                        let de = max d $ pathDepth s
                            es = unalt edges
-                       when (de >= minToStore) $ do
+                       when (de >= 1) $ do
                            nodes1 <- gets (sNodes . stats)
                            -- store as upper score, and as move, the first one generated
                            lift $ do
@@ -676,11 +647,7 @@ pvSearch nst !a !b !d = do
 -- PV Zero Window
 pvZeroW :: NodeState -> Path -> Int -> Int -> Bool -> Search Path
 pvZeroW !nst !b !d !lastnul redu | d <= 0 = do
-    -- Now that we moved the ttRead call under pvZeroW we are not prepared
-    -- to handle correctly the case minToRetr = 0
     (v, ns) <- mustQSearch (pathScore bGrain) (pathScore b)
-    when (minToStore == 0)
-        $ lift $  ttStore 0 2 v (Move 0) ns
     let !esc = pathFromScore ("pvQSearch 21:" ++ show v) v
     pindent $ "<> " ++ show esc
     return esc
@@ -688,10 +655,7 @@ pvZeroW !nst !b !d !lastnul redu | d <= 0 = do
 pvZeroW !nst !b !d !lastnull redu = do
     pindent $ ":> " ++ show b
     -- Check if we have it in TT
-    (hdeep, tp, hsc, e', nodes')
-        <- if d >= minToRetr
-              then reTrieve >> lift ttRead
-              else return (-1, 0, 0, undefined, 0)
+    (hdeep, tp, hsc, e', nodes') <- reTrieve >> lift ttRead
     let bsco = pathScore b
     if hdeep >= d && (tp == 2 || tp == 1 && hsc >= bsco || tp == 0 && hsc < bsco)
        then  do
@@ -734,7 +698,7 @@ pvZeroW !nst !b !d !lastnull redu = do
                      pindent $ "<: " ++ show s
                      let !de = max d $ pathDepth s
                          es = unalt edges
-                     when (de >= minToStore && s < b) $ do	-- we failed low
+                     when (de >= 1 && s < b) $ do	-- we failed low
                          !nodes1 <- gets (sNodes . stats)
                          -- store as upper score, and as move the first one (generated)
                          lift $ do
@@ -981,10 +945,10 @@ checkFailOrPVLoop xstats b d e s nst = do
          if s >= b
             then do
               lift $ do
-                  when (de >= minToStore) $ do
+                  when (de >= 1) $ do
                       let typ = 1	-- best move is e and is beta cut (score is lower limit)
                       ttStore de typ (pathScore b) e nodes'
-                  betaCut True d (absdp sst) e -- anounce a beta move (for example, update history)
+                  betaCut (absdp sst) e -- anounce a beta move (for example, update history)
               incBeta mn
               -- when debug $ logmes $ "<-- pvInner: beta cut: " ++ show s ++ ", return " ++ show b
               let !csc = if s > b then combinePath s b else bestPath s b
@@ -992,8 +956,7 @@ checkFailOrPVLoop xstats b d e s nst = do
               let !nst1 = nst { cursc = csc, pvcont = emptySeq }
               return (True, nst1)
             else do	-- means: > a && < b
-              -- when (nxtnt nst == PVNode || de >= minToStore) $	-- why this || with node type?
-              when (de >= minToStore) $	lift $ do
+              when (de >= 1) $	lift $ do
                   let typ = 2	-- score is exact
                   ttStore de typ (pathScore s) e nodes'
               let !nst1 = nst { cursc = s, nxtnt = nextNodeType (nxtnt nst),
@@ -1010,7 +973,7 @@ checkFailOrPVLoopZ xstats b d e s nst = do
        then do
             -- when in a cut node and the move dissapointed - negative history - ???
             when (useNegHist && mn <= negHistMNo)
-                 $ lift $ betaCut False d (absdp sst) e
+                 $ lift $ betaCut (absdp sst) e
             !kill1 <- newKiller d s nst
             let !nst1 = nst { movno = mn+1, killer = kill1, pvcont = emptySeq }
             return (False, nst1)
@@ -1020,10 +983,10 @@ checkFailOrPVLoopZ xstats b d e s nst = do
              nodes' = nodes1 - nodes0
              !de = max d $ pathDepth s
          lift $ do
-             when (de >= minToStore) $ do
+             when (de >= 1) $ do
                  let typ = 1	-- best move is e and is beta cut (score is lower limit)
                  ttStore de typ (pathScore b) e nodes'
-             betaCut True d (absdp sst) e -- anounce a beta move (for example, update history)
+             betaCut (absdp sst) e -- anounce a beta move (for example, update history)
          incBeta mn
          let !csc = if s > b then combinePath s b else bestPath s b
          pindent $ "beta cut: " ++ show csc
@@ -1076,7 +1039,6 @@ genAndSort nst a b d = do
     return $ Alt es
 
 -- Late Move Reduction
--- This part (including lmrIndex) seems well optimized
 {-# INLINE reduceLmr #-}
 reduceLmr :: Int -> Bool -> Bool -> Int -> Int -> Int
 reduceLmr !d nearmatea !spec !exd !w
@@ -1091,22 +1053,7 @@ reduceLmr !d nearmatea !spec !exd !w
           lmrMvs3  = 17	-- reduced by max 2
           lmrMvs4  = 33	-- reduced by max 3
 
-{-# INLINE reduceDepth #-}
-reduceDepth :: Int -> Int -> Bool -> Int
-reduceDepth !d !w !pv = m0n
-    where nd = d - k
-          !m0n = max 0 nd
-          k  = if pv then lmrReducePv  `unsafeAt` lmrIndex d w
-                     else lmrReduceArr `unsafeAt` lmrIndex d w
-
--- Here we know the index is correct, but unsafeIndex (from Data.Ix)
--- is unfortunately not exported...
--- The trick: define an UnsafeIx class to calculate direct unsafeIndex
-lmrIndex :: Int -> Int -> Int
-lmrIndex d w = unsafeIndex ((1, 1), (lmrMaxDepth, lmrMaxWidth)) (d1, w1)
-    where d1 = min lmrMaxDepth $ max 1 d
-          w1 = min lmrMaxWidth $ max 1 w
-
+{--
 -- The UnsafeIx inspired from GHC.Arr (class Ix)
 class Ord a => UnsafeIx a where
     unsafeIndex :: (a, a) -> a -> Int
@@ -1121,6 +1068,7 @@ instance (UnsafeIx a, UnsafeIx b) => UnsafeIx (a, b) where -- as derived
     {-# SPECIALISE instance UnsafeIx (Int,Int) #-}
     {-# INLINE unsafeIndex #-}
     unsafeIndex ((l1,l2),(u1,u2)) (i1,i2) = unsafeIndex (l1,u1) i1 * unsafeRangeSize (l2,u2) + unsafeIndex (l2,u2) i2
+--}
 
 -- This is a kind of monadic fold optimized for (beta) cut
 -- {-# INLINE pvLoop #-}

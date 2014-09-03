@@ -49,9 +49,7 @@ nearmate i = i >= mateScore - 255 || i <= -mateScore + 255
 useHash :: Bool
 useHash = True
 
-depthForMovesSortPv, depthForMovesSort, scoreDiffEqual, printEvalInt :: Int
-depthForMovesSortPv = 1	-- use history for sorting moves when pv or cut nodes
-depthForMovesSort   = 1	-- use history for sorting moves
+scoreDiffEqual, printEvalInt :: Int
 scoreDiffEqual      = 4 -- under this score difference moves are considered to be equal (choose random)
 printEvalInt        = 2 `shiftL` 12 - 1	-- if /= 0: print eval info every so many nodes
 
@@ -98,25 +96,15 @@ genMoves depth absdp pv = do
     -- when debugGen $ do
     --     lift $ ctxLog "Debug" $ "--> genMoves:\n" ++ showTab (black p) (slide p) (kkrq p) (diag p)
     let !c = moving p
-        -- lc = map (genmv True p) $ genMoveFCheck p
         lc = genMoveFCheck p
     if isCheck p c
        then return (lc, [])
        else do
             let l0 = genMoveCast p
-                -- l1 = map (genmvT p) $ genMoveTransf p
                 l1 = genMoveTransf p
-                -- l2 = map (genmv True p) $ genMoveCapt p
                 (l2w, l2l) = genMoveCaptWL p
-                -- l2w = map (genmv True p) pl2w
-                -- l2l = map (genmv True p) pl2l
                 l3'= genMoveNCapt p
-                -- l3'= map (genmv False p) $ genMoveNCapt p
-            l3 <- if pv && depth >= depthForMovesSortPv
-                     || not pv && depth >= depthForMovesSort
-                     -- then sortMovesFromHash l3'
-                     then sortMovesFromHist absdp l3'
-                     else return l3'
+            l3 <- sortMovesFromHist absdp l3'
             return $! if loosingLast
                          then (l1 ++ l2w, l0 ++ l3 ++ l2l)
                          else (l1 ++ l2w ++ l2l, l0 ++ l3)
@@ -144,8 +132,7 @@ genTactMoves = do
 sortMovesFromHist :: Int -> [Move] -> Game [Move]
 sortMovesFromHist d mvs = do
     s <- get
-    -- mvsc <- liftIO $ mapM (\m -> fmap negate $ valHist (hist s) (fromSquare m) (toSquare m) d) mvs
-    mvsc <- liftIO $ mapM (\m -> valHist (hist s) (fromSquare m) (toSquare m) d) mvs
+    mvsc <- liftIO $ mapM (\m -> valHist (hist s) (fromSquare m) (toSquare m)) mvs
     -- return $ map fst $ sortBy (comparing snd) $ zip mvs mvsc
     let (posi, zero) = partition ((/=0) . snd) $ zip mvs mvsc
     return $! map fst $ sortBy (comparing snd) posi ++ zero
@@ -335,18 +322,9 @@ ttRead = if not useHash then return empRez else do
     mhr <- liftIO $ do
         let ptr = retrieveEntry (hash s) (zobkey p)
         readCache ptr
-    -- let (r, sc) = case mhr of
-               -- Just t@(_, _, sco, _, _) -> (t, sco)
-               -- _      -> (empRez, 0)
     let r = case mhr of
                Just t -> t
                _      -> empRez
-    --     (_, _, sc, _, _) = r
-    -- if (sc `mod` 4 /= 0)
-    --     then do
-    --         logMes $ "*** ttRead " ++ show r ++ " zkey " ++ show (zobkey p)
-    --         return empRez
-    --     else return r
     return r
     where empRez = (-1, 0, 0, Move 0, 0)
 
@@ -355,25 +333,16 @@ ttStore :: Int -> Int -> Int -> Move -> Int -> Game ()
 ttStore !deep !tp !sc !bestm !nds = if not useHash then return () else do
     s <- get
     p <- getPos
-    -- when (sc `mod` 4 /= 0 && tp == 2) $ liftIO $ do
-    --     putStrLn $ "info string In ttStore: tp = " ++ show tp ++ " sc = " ++ show sc
-    --         ++ " best = " ++ show best ++ " nodes = " ++ show nodes
-        -- putStrLn $ "info string score in position: " ++ show (staticScore p)
     -- We use the type: 0 - upper limit, 1 - lower limit, 2 - exact score
     liftIO $ writeCache (hash s) (zobkey p) deep tp sc bestm nds
-    -- when debug $ lift $ ctxLog "Debug" $ "*** ttStore (deep/tp/sc/mv) " ++ show deep
-    --      ++ " / " ++ show tp ++ " / " ++ show sc ++ " / " ++ show best
-    --      ++ " status: " ++ show st ++ " (" ++ show (zobkey p) ++ ")"
-    -- return ()
 
 -- History heuristic table update when beta cut
-betaCut :: Bool -> Int -> Int -> Move -> Game ()
-betaCut good _ absdp m = do	-- dummy: depth
+betaCut :: Int -> Move -> Game ()
+betaCut absdp m = do	-- dummy: depth
     s <- get
     t <- getPos
-    -- liftIO $ toHist (hist s) good (fromSquare m) (toSquare m) absdp
     case tabla t (toSquare m) of
-        Empty -> liftIO $ toHist (hist s) good (fromSquare m) (toSquare m) absdp
+        Empty -> liftIO $ toHist (hist s) (fromSquare m) (toSquare m) absdp
         _     -> return ()
 
 -- Will not be pruned nor LMR reduced

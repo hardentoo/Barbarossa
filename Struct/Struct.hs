@@ -143,7 +143,7 @@ reset50Moves b = b .&. fyZero
 
 {-# INLINE set50Moves #-}
 set50Moves :: Int -> BBoard -> BBoard
-set50Moves i b = reset50Moves b .|. (fromIntegral i `shift` 8 .&. fyMask)
+set50Moves i b = reset50Moves b .|. (fromIntegral i `unsafeShiftL` 8 .&. fyMask)
 
 {-# INLINE addHalfMove #-}
 addHalfMove :: BBoard -> BBoard
@@ -284,7 +284,7 @@ moveIsTransf :: Move -> Bool
 moveIsTransf (Move w) = testBit w 13
 
 moveTransfPiece (Move w) = transfCodes `unsafeAt` fromIntegral x
-    where x = (w `shiftR` 14) .&. 0x03
+    where x = (w `unsafeShiftR` 14) .&. 0x03
 
 {-# INLINE makeTransf #-}
 makeTransf :: Piece -> Square -> Square -> Move
@@ -298,17 +298,14 @@ makeTransf p f t = Move w
 
 -- General functions for move encoding / decoding
 encodeFromTo :: Square -> Square -> Word32
-encodeFromTo f t = fromIntegral t .|. (fromIntegral f `shiftL` 6)
+encodeFromTo f t = fromIntegral t .|. (fromIntegral f `unsafeShiftL` 6)
 
 -- The type have to be only 2 bits (i.e. 0 to 3)
 movetype :: Int -> Word32 -> Word32
-movetype t w = fromIntegral (t `shiftL` 12) .|. w
-
--- code :: Word32 -> Word32 -> Word32
--- code c w = (c `shiftL` 14) .|. w
+movetype t w = fromIntegral (t `unsafeShiftL` 12) .|. w
 
 fromSquare :: Move -> Square
-fromSquare (Move m) = fromIntegral (m `shiftR` 6) .&. 0x3F
+fromSquare (Move m) = fromIntegral (m `unsafeShiftR` 6) .&. 0x3F
 
 toSquare :: Move -> Square
 toSquare (Move m) = fromIntegral (m .&. 0x3F)
