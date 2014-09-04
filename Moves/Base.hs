@@ -17,9 +17,7 @@ module Moves.Base (
     nearmate	-- , special
 ) where
 
--- import Data.Array.IArray
--- import Debug.Trace
--- import Control.Exception (assert)
+import Control.Applicative ((<$>))
 import Data.Bits
 import Data.List
 import Control.Monad.State
@@ -132,10 +130,7 @@ genTactMoves = do
 sortMovesFromHist :: Int -> [Move] -> Game [Move]
 sortMovesFromHist d mvs = do
     s <- get
-    mvsc <- liftIO $ mapM (\m -> valHist (hist s) (fromSquare m) (toSquare m)) mvs
-    -- return $ map fst $ sortBy (comparing snd) $ zip mvs mvsc
-    let (posi, zero) = partition ((/=0) . snd) $ zip mvs mvsc
-    return $! map fst $ sortBy (comparing snd) posi ++ zero
+    map fst . sortBy (comparing snd) <$> (liftIO $ mapM (\m -> (,) m <$> valHist (hist s) m) mvs)
 
 -- massert :: String -> Game Bool -> Game ()
 -- massert s mb = do
@@ -342,7 +337,7 @@ betaCut absdp m = do	-- dummy: depth
     s <- get
     t <- getPos
     case tabla t (toSquare m) of
-        Empty -> liftIO $ toHist (hist s) (fromSquare m) (toSquare m) absdp
+        Empty -> liftIO $ toHist (hist s) m absdp
         _     -> return ()
 
 -- Will not be pruned nor LMR reduced
