@@ -128,9 +128,9 @@ genTactMoves = do
     return mvs
 
 sortMovesFromHist :: Int -> [Move] -> Game [Move]
-sortMovesFromHist d mvs = do
+sortMovesFromHist !d mvs = do
     s <- get
-    map fst . sortBy (comparing snd) <$> (liftIO $ mapM (\m -> (,) m <$> valHist (hist s) m) mvs)
+    map fst . sortBy (comparing snd) <$> (liftIO $ mapM (\m -> (,) m <$> valHist (hist s) d m) mvs)
 
 -- massert :: String -> Game Bool -> Game ()
 -- massert s mb = do
@@ -337,7 +337,7 @@ betaCut absdp m = do	-- dummy: depth
     s <- get
     t <- getPos
     case tabla t (toSquare m) of
-        Empty -> liftIO $ toHist (hist s) m absdp
+        Empty -> liftIO $ toHist (hist s) absdp m
         _     -> return ()
 
 -- Will not be pruned nor LMR reduced
