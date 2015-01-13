@@ -914,7 +914,7 @@ pvInnerLoopExtenZ b d spec !exd nst redu = do
     let onemB = negatePath $ b -: scoreGrain
         negb  = negatePath b
     viztreeABD (pathScore negb) (pathScore onemB) d'
-    if not redu || d' == d1
+    if not redu || d' == d1 || crtnt nst == AllNode
        then fmap pnextlev (pvZeroW nst onemB d' nulMoves redu)
        else do
            incRedu
@@ -929,7 +929,7 @@ pvInnerLoopExtenZ b d spec !exd nst redu = do
            when (sr < b && s1 >= b) $ do
                incReMi	-- LMR missed the point
                lift $ finNode "LMRM" True
-           if sr < b	-- || d' >= d1
+           if sr < b
               then return sr	-- failed low (as expected), or not reduced
               else do
                 -- was reduced and didn't fail low: re-search with full depth
