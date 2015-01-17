@@ -11,7 +11,7 @@ module Search.Albeta (
 
 import Control.Monad
 import Control.Monad.State hiding (gets, modify)
-import Data.Bits ((.&.))
+import Data.Bits ((.&.), unsafeShiftL)
 import Data.List (delete, sortBy)
 import Data.Ord (comparing)
 -- import Data.Array.Base
@@ -529,7 +529,7 @@ checkFailOrPVRoot xstats b d e s nst =  do
                             when (de >= minToStore) $ do
                                 let typ = 1	-- beta cut (score is lower limit) with move e
                                 ttStore de typ (pathScore b) e nodes'
-                            betaCut e nodes'
+                            betaCut e $ nodes' `unsafeShiftL` 1
                         let xpvslg = insertToPvs d pvg (pvsl nst)	-- the good
                             !csc = if s > b then combinePath s b else bestPath s b
                         pindent $ "beta cut: " ++ show csc
@@ -968,7 +968,7 @@ checkFailOrPVLoop xstats b d e s nst = do
                   when (de >= minToStore) $ do
                       let typ = 1	-- best move is e and is beta cut (score is lower limit)
                       ttStore de typ (pathScore b) e nodes'
-                  betaCut e nodes' -- anounce a beta move (for example, update history)
+                  betaCut e $ nodes' `unsafeShiftL` 1 -- anounce a beta move (for example, update history)
               incBeta mn
               -- when debug $ logmes $ "<-- pvInner: beta cut: " ++ show s ++ ", return " ++ show b
               let !csc = if s > b then combinePath s b else bestPath s b
@@ -1007,7 +1007,7 @@ checkFailOrPVLoopZ xstats b d e s nst = do
              when (de >= minToStore) $ do
                  let typ = 1	-- best move is e and is beta cut (score is lower limit)
                  ttStore de typ (pathScore b) e nodes'
-             betaCut e nodes' -- anounce a beta move (for example, update history)
+             betaCut e $ nodes' `unsafeShiftL` 1 -- anounce a beta move (for example, update history)
          incBeta mn
          let !csc = if s > b then combinePath s b else bestPath s b
          pindent $ "beta cut: " ++ show csc

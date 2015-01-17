@@ -389,7 +389,7 @@ ttStore !deep !tp !sc !bestm !nds = if not useHash then return () else do
 
 -- History heuristic table update when beta cut
 betaCut :: Move -> Int -> Game ()
-betaCut m nodes = do
+betaCut m !nodes = do
     s <- get
     t <- getPos
     -- liftIO $ toHist (hist s) good (fromSquare m) (toSquare m) absdp
