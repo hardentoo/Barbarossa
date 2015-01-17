@@ -152,7 +152,7 @@ sortMovesFromHist :: Int -> [Move] -> Game [Move]
 sortMovesFromHist d mvs = do
     s <- get
     -- mvsc <- liftIO $ mapM (\m -> fmap negate $ valHist (hist s) (fromSquare m) (toSquare m) d) mvs
-    mvsc <- liftIO $ mapM (\m -> valHist (hist s) (fromSquare m) (toSquare m) d) mvs
+    mvsc <- liftIO $ mapM (\m -> valHist (hist s) (fromSquare m) (toSquare m)) mvs
     -- return $ map fst $ sortBy (comparing snd) $ zip mvs mvsc
     let (posi, zero) = partition ((/=0) . snd) $ zip mvs mvsc
     return $! map fst $ sortBy (comparing snd) posi ++ zero
@@ -388,13 +388,13 @@ ttStore !deep !tp !sc !bestm !nds = if not useHash then return () else do
     -- return ()
 
 -- History heuristic table update when beta cut
-betaCut :: Bool -> Int -> Int -> Move -> Game ()
-betaCut good _ absdp m = do	-- dummy: depth
+betaCut :: Move -> Int -> Game ()
+betaCut m nodes = do
     s <- get
     t <- getPos
     -- liftIO $ toHist (hist s) good (fromSquare m) (toSquare m) absdp
     case tabla t (toSquare m) of
-        Empty -> liftIO $ toHist (hist s) good (fromSquare m) (toSquare m) absdp
+        Empty -> liftIO $ toHist (hist s) (fromSquare m) (toSquare m) nodes
         _     -> return ()
 
 -- Will not be pruned nor LMR reduced

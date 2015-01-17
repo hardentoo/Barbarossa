@@ -501,6 +501,7 @@ checkFailOrPVRoot xstats b d e s nst =  do
              pvg    = Pvsl s nodes' True	-- the good
              pvb    = Pvsl s nodes' False	-- the bad
              de = max d $ pathDepth s
+         lift $ betaCut e nodes'	-- no beta cut here, just normal subtree volume
          if d == 1
             then  do
                  let typ = 2
@@ -528,7 +529,7 @@ checkFailOrPVRoot xstats b d e s nst =  do
                             when (de >= minToStore) $ do
                                 let typ = 1	-- beta cut (score is lower limit) with move e
                                 ttStore de typ (pathScore b) e nodes'
-                            betaCut True d (absdp sst) e
+                            betaCut e nodes'
                         let xpvslg = insertToPvs d pvg (pvsl nst)	-- the good
                             !csc = if s > b then combinePath s b else bestPath s b
                         pindent $ "beta cut: " ++ show csc
@@ -542,7 +543,7 @@ checkFailOrPVRoot xstats b d e s nst =  do
                             when (de >= minToStore) $ do
                                 let typ = 2	-- best move so far (score is exact)
                                 ttStore de typ sc e nodes'
-                            betaCut True d (absdp sst) e	-- not really cut, but good move
+                            betaCut e nodes'
                         let xpvslg = insertToPvs d pvg (pvsl nst)	-- the good
                             nst1 = nst { cursc = s, nxtnt = nextNodeType (nxtnt nst),
                                          movno = mn + 1, pvsl = xpvslg, pvcont = emptySeq }
@@ -587,8 +588,8 @@ pvSearch _ !a !b !d | d <= 0 = do
 pvSearch nst !a !b !d = do
     pindent $ "=> " ++ show a ++ ", " ++ show b
     let !inPv = nxtnt nst == PVNode
-    -- Here we are always in PV:
-    when (not inPv) $ lift $ absurd $ "pvSearch not inPv, nst = " ++ show nst
+    -- Here we are always in PV, except for d <= 2:
+    when (not inPv || d <= 2) $ lift $ absurd $ "pvSearch not inPv, nst = " ++ show nst
     -- Check first for a TT entry of the position to search
     (hdeep, tp, hsc, e', nodes')
         <- if d >= minToRetr
@@ -949,6 +950,10 @@ checkFailOrPVLoop :: SStats -> Path -> Int -> Move -> Path
 checkFailOrPVLoop xstats b d e s nst = do
     sst <- get
     let mn = movno nst
+        nodes0 = sNodes xstats
+        nodes1 = sNodes $ stats sst
+        !nodes' = nodes1 - nodes0
+    lift $ betaCut e nodes' -- no beta cut here, just subtree volume
     if s <= cursc nst
        then do
             -- when in a cut node and the move dissapointed - negative history
@@ -956,17 +961,14 @@ checkFailOrPVLoop xstats b d e s nst = do
             let !nst1 = nst { movno = mn+1, killer = kill1, pvcont = emptySeq }
             return (False, nst1)
        else do
-         let nodes0 = sNodes xstats
-             nodes1 = sNodes $ stats sst
-             nodes' = nodes1 - nodes0
-             !de = max d $ pathDepth s
+         let !de = max d $ pathDepth s
          if s >= b
             then do
               lift $ do
                   when (de >= minToStore) $ do
                       let typ = 1	-- best move is e and is beta cut (score is lower limit)
                       ttStore de typ (pathScore b) e nodes'
-                  betaCut True d (absdp sst) e -- anounce a beta move (for example, update history)
+                  betaCut e nodes' -- anounce a beta move (for example, update history)
               incBeta mn
               -- when debug $ logmes $ "<-- pvInner: beta cut: " ++ show s ++ ", return " ++ show b
               let !csc = if s > b then combinePath s b else bestPath s b
@@ -979,7 +981,7 @@ checkFailOrPVLoop xstats b d e s nst = do
                   when (de >= minToStore) $ do
                       let typ = 2	-- score is exact
                       ttStore de typ (pathScore s) e nodes'
-                  betaCut True d (absdp sst) e -- not really a cut, but good move here
+                  betaCut e nodes' -- not really a cut, but good move here
               let !nst1 = nst { cursc = s, nxtnt = nextNodeType (nxtnt nst),
                                 movno = mn+1, pvcont = emptySeq }
               return (False, nst1)
@@ -990,24 +992,22 @@ checkFailOrPVLoopZ :: SStats -> Path -> Int -> Move -> Path
 checkFailOrPVLoopZ xstats b d e s nst = do
     sst <- get
     let mn = movno nst
+        nodes0 = sNodes xstats
+        nodes1 = sNodes $ stats sst
+        !nodes' = nodes1 - nodes0
+    lift $ betaCut e nodes' -- no beta cut here, just the subtree volume
     if s < b	-- failed low
        then do
-            -- when in a cut node and the move dissapointed - negative history - ???
-            when (useNegHist && mn <= negHistMNo)
-                 $ lift $ betaCut False d (absdp sst) e
             !kill1 <- newKiller d s nst
             let !nst1 = nst { movno = mn+1, killer = kill1, pvcont = emptySeq }
             return (False, nst1)
        else do	-- here is s >= b: failed high
-         let nodes0 = sNodes xstats
-             nodes1 = sNodes $ stats sst
-             nodes' = nodes1 - nodes0
-             !de = max d $ pathDepth s
+         let !de = max d $ pathDepth s
          lift $ do
              when (de >= minToStore) $ do
                  let typ = 1	-- best move is e and is beta cut (score is lower limit)
                  ttStore de typ (pathScore b) e nodes'
-             betaCut True d (absdp sst) e -- anounce a beta move (for example, update history)
+             betaCut e nodes' -- anounce a beta move (for example, update history)
          incBeta mn
          let !csc = if s > b then combinePath s b else bestPath s b
          pindent $ "beta cut: " ++ show csc
