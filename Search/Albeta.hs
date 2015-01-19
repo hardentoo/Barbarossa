@@ -1133,11 +1133,11 @@ pvQSearch !a !b c = do				   -- to avoid endless loops
                           return $! trimax a b inEndlessCheck
                       else do
                           -- for check extensions in case of very few moves (1 or 2):
-                          -- if 1 move: search even deeper
-                          -- if 2 moves: same depth
-                          -- if 3 or more: no extension
+                          -- if 1 move: extend 1
+                          -- if 2 moves: no extension
+                          -- if 3 or more: negative extension
                           let !esc = lenmax3 $ unalt edges
-                              !nc = c + esc - 2
+                              !nc = c + esc - 3
                           pvQLoop b nc a edges
        else if qsBetaCut && stp >= b
                then do
