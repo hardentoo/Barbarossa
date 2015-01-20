@@ -568,7 +568,7 @@ insertToPvs d p ps@(q:qs)
 mustQSearch :: Int -> Int -> Search (Int, Int)
 mustQSearch !a !b = do
     nodes0 <- gets (sNodes . stats)
-    v <- pvQSearch a b 0
+    v <- pvQSearch a b
     nodes1 <- gets (sNodes . stats)
     let deltan = nodes1 - nodes0
     return (v, deltan)
@@ -1112,8 +1112,8 @@ trimax a b x
     | otherwise = x
 
 -- PV Quiescent Search
-pvQSearch :: Int -> Int -> Int -> Search Int
-pvQSearch !a !b c = do				   -- to avoid endless loops
+pvQSearch :: Int -> Int -> Search Int
+pvQSearch !a !b = do				   -- to avoid endless loops
     -- qindent $ "=> " ++ show a ++ ", " ++ show b
     !stp <- lift staticVal				-- until we can recognize repetition
     viztreeScore $ "Static: " ++ show stp
@@ -1126,19 +1126,7 @@ pvQSearch !a !b c = do				   -- to avoid endless loops
               then do
                   lift $ finNode "MATE" False
                   return $! trimax a b stp
-              else if c >= qsMaxChess
-                      then do
-                          viztreeScore $ "endless check: " ++ show inEndlessCheck
-                          lift $ finNode "ENDL" False
-                          return $! trimax a b inEndlessCheck
-                      else do
-                          -- for check extensions in case of very few moves (1 or 2):
-                          -- if 1 move: extend 1
-                          -- if 2 moves: no extension
-                          -- if 3 or more: negative extension
-                          let !esc = lenmax3 $ unalt edges
-                              !nc = c + esc - 3
-                          pvQLoop b nc a edges
+              else pvQLoop b a edges
        else if qsBetaCut && stp >= b
                then do
                    lift $ finNode "BETA" False
@@ -1154,23 +1142,19 @@ pvQSearch !a !b c = do				   -- to avoid endless loops
                                  lift $ finNode "NOCA" False
                                  return $! trimax a b stp
                              else if stp > a
-                                     then pvQLoop b c stp edges
-                                     else pvQLoop b c a   edges
-    where lenmax3 = go 0
-              where go n _ | n == 3 = 3
-                    go n []         = n
-                    go n (_:as)     = go (n+1) as
+                                     then pvQLoop b stp edges
+                                     else pvQLoop b a   edges
 
-pvQLoop :: Int -> Int -> Int -> Alt Move -> Search Int
-pvQLoop b c = go
+pvQLoop :: Int -> Int -> Alt Move -> Search Int
+pvQLoop b = go
     where go !s (Alt [])     = return s
           go !s (Alt (e:es)) = do
-              (!cut, !s') <- pvQInnerLoop b c s e
+              (!cut, !s') <- pvQInnerLoop b s e
               if cut then return s'
                      else go s' $ Alt es
 
-pvQInnerLoop :: Int -> Int -> Int -> Move -> Search (Bool, Int)
-pvQInnerLoop !b c !a e = do
+pvQInnerLoop :: Int -> Int -> Move -> Search (Bool, Int)
+pvQInnerLoop !b !a e = do
     abrt <- timeToAbort
     if abrt
        then return (True, b)	-- it doesn't matter which score we return
@@ -1188,7 +1172,7 @@ pvQInnerLoop !b c !a e = do
                                return (-sc)
                            _        -> do
                              modify $ \s -> s { absdp = absdp s + 1 }
-                             !sc <- pvQSearch (-b) (-a) c
+                             !sc <- pvQSearch (-b) (-a)
                              modify $ \s -> s { absdp = absdp s - 1 }	-- no usedext here
                              return (-sc)
                 lift undoMove
