@@ -55,8 +55,8 @@ scoreDiffEqual      = 4 -- under this score difference moves are considered to b
 printEvalInt        = 2 `shiftL` 12 - 1	-- if /= 0: print eval info every so many nodes
 
 depthForEvalSortPv, depthForEvalSort :: Int
-depthForEvalSortPv = 4	-- use history for sorting moves when pv or cut nodes
-depthForEvalSort   = 5	-- use history for sorting moves
+depthForEvalSortPv = 2	-- use history for sorting moves when pv or cut nodes
+depthForEvalSort   = 3	-- use history for sorting moves
 
 mateScore :: Int
 mateScore = 20000
