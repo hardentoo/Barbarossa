@@ -17,6 +17,7 @@ module Moves.Base (
     nearmate	-- , special
 ) where
 
+import Control.Applicative ((<$>))
 import Data.Bits
 import Data.List
 import Control.Monad.State
@@ -52,6 +53,10 @@ depthForMovesSortPv = 1	-- use history for sorting moves when pv or cut nodes
 depthForMovesSort   = 1	-- use history for sorting moves
 scoreDiffEqual      = 4 -- under this score difference moves are considered to be equal (choose random)
 printEvalInt        = 2 `shiftL` 12 - 1	-- if /= 0: print eval info every so many nodes
+
+depthForEvalSortPv, depthForEvalSort :: Int
+depthForEvalSortPv = 4	-- use history for sorting moves when pv or cut nodes
+depthForEvalSort   = 5	-- use history for sorting moves
 
 mateScore :: Int
 mateScore = 20000
@@ -104,7 +109,7 @@ genMoves depth absdp pv = do
             l3 <- if pv && depth >= depthForMovesSortPv
                      || not pv && depth >= depthForMovesSort
                      -- then sortMovesFromHash l3'
-                     then sortMovesFromHist l3'
+                     then sortMovesFromHist depth pv l3'
                      else return l3'
             return $! if loosingLast
                          -- then (checkGenMoves p $ l1 ++ l2w, checkGenMoves p $ l0 ++ l3 ++ l2l)
@@ -148,12 +153,29 @@ checkGenMove p m@(Move w)
                             ++ showHex w (" in pos\n" ++ showMyPos p)
 --}
 
-sortMovesFromHist :: [Move] -> Game [Move]
-sortMovesFromHist mvs = do
+sortMovesFromHist :: Int -> Bool -> [Move] -> Game [Move]
+sortMovesFromHist depth pv mvs = do
     s <- get
     mvsc <- liftIO $ mapM (\m -> valHist (hist s) m) mvs
     let (posi, zero) = partition ((/=0) . snd) $ zip mvs mvsc
-    return $! map fst $ sortBy (comparing snd) posi ++ zero
+        posis = map fst $ sortBy (comparing snd) posi
+    zeros <- if pv && depth >= depthForEvalSortPv || not pv && depth >= depthForEvalSort
+                then sortMovesByEval $ map fst zero
+                else return $ map fst zero
+    return $ posis ++ zeros
+
+sortMovesByEval :: [Move] -> Game [Move]
+sortMovesByEval mvs = map fst . sortBy (comparing snd) <$> forM mvs moveScore
+
+moveScore :: Move -> Game (Move, Int)
+moveScore m = do
+    res <- doMove False m False	-- should qs be True? Would check remis rules
+    case res of
+        Illegal -> return (m, maxBound)
+        _       -> do
+            sc  <- gets (staticScore . head . stack)	-- don't negate! Ascending sort!
+            undoMove
+            return (m, sc)
 
 -- massert :: String -> Game Bool -> Game ()
 -- massert s mb = do
