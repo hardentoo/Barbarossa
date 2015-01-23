@@ -32,6 +32,7 @@ import Struct.Context
 import Struct.Status
 import Hash.TransTab
 import Moves.Board
+import Moves.MGen
 import Eval.Eval
 import Moves.ShowMe
 import Moves.History
@@ -83,47 +84,33 @@ posToState p c h e = MyState {
 posNewSearch :: MyState -> MyState
 posNewSearch p = p { hash = newGener (hash p) }
 
--- debugGen :: Bool
--- debugGen = False
-
-loosingLast :: Bool
-loosingLast = False
-
-genMoves :: Int -> Int -> Bool -> Game ([Move], [Move])
+genMoves :: Int -> Int -> Bool -> Game (MGen, MGen)
 genMoves depth absdp pv = do
     p <- getPos
     let !c = moving p
-        lc = genMoveFCheck p
     if isCheck p c
-       then return (lc, [])
+       then return (makePureGen $ genMoveFCheck p, makePureGen [])
        else do
             let l0 = genMoveCast p
                 l1 = genMoveTransf p
                 (l2w, l2l) = genMoveCaptWL p
-                l3'= genMoveNCapt p
-            l3 <- if pv && depth >= depthForMovesSortPv
-                     || not pv && depth >= depthForMovesSort
-                     -- then sortMovesFromHash l3'
-                     then sortMovesFromHist l3'
-                     else return l3'
-            return $! if loosingLast
-                         -- then (checkGenMoves p $ l1 ++ l2w, checkGenMoves p $ l0 ++ l3 ++ l2l)
-                         -- else (checkGenMoves p $ l1 ++ l2w ++ l2l, checkGenMoves p $ l0 ++ l3)
-                         then (l1 ++ l2w, l0 ++ l3 ++ l2l)
-                         else (l1 ++ l2w ++ l2l, l0 ++ l3)
+                l3 = genMoveNCapt p
+                g3 = if pv && depth >= depthForMovesSortPv
+                        || not pv && depth >= depthForMovesSort
+                        then makeGameGen $ sortMovesFromHist l3
+                        else makePureGen l3
+            return $ (makePureGen $ l1 ++ l2w ++ l2l, makeListGen [makePureGen l0, g3 ])
 
 -- Generate only tactical moves, i.e. promotions, captures & check escapes
-genTactMoves :: Game [Move]
+genTactMoves :: Game MGen
 genTactMoves = do
     p <- getPos
     let !c = moving p
         l1 = genMoveTransf p
         (l2w, _) = genMoveCaptWL p
-        lc = genMoveFCheck p
-        !mvs | isCheck p c = lc
-             | otherwise   = l1 ++ l2w
-    -- return $ checkGenMoves p mvs
-    return mvs
+        mg | isCheck p c = makePureGen $ genMoveFCheck p
+           | otherwise   = makePureGen $ l1 ++ l2w
+    return mg
 
 {--
 checkGenMoves :: MyPos -> [Move] -> [Move]
@@ -219,10 +206,8 @@ doMove real m qs = do
                     if remis
                        then return $ Final 0
                        else do
-                           -- let dext = if inCheck p || goPromo p m1 || movePassed p m1 then 1 else 0
-                           -- let dext = if inCheck p || goPromo pc m1 then 1 else 0
                            let dext = if inCheck p then 1 else 0
-                           return $ Exten dext $ moveIsSpecial pc m1
+                           return $! Exten dext $! moveIsSpecial pc m1
 
 doNullMove :: Game ()
 doNullMove = do
