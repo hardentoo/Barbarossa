@@ -299,15 +299,16 @@ okInSequence m1 m2 = do
 {-# INLINE staticVal #-}
 staticVal :: Game Int
 staticVal = do
-    s <- get
+    -- s <- get
     t <- getPos
-    let !c = moving t
-        !stSc = if not (checkOk t && kingsOk t)
-                   then error $ "Wrong position, pos stack:\n" ++ concatMap showMyPos (stack s)
-                   else staticScore t
-        !stSc1 | check t /= 0 = if hasMoves t c then stSc else -mateScore
-               | otherwise    = stSc
-    return stSc1
+    -- let !c = moving t
+    --     !stSc = if not (checkOk t && kingsOk t)
+    --                then error $ "Wrong position, pos stack:\n" ++ concatMap showMyPos (stack s)
+    --                else staticScore t
+    --     !stSc1 | check t /= 0 = if hasMoves t c then stSc else -mateScore
+    --            | otherwise    = stSc
+    -- return stSc1
+    return $ staticScore t
 
 {-# INLINE finNode #-}
 finNode :: String -> Bool -> Game ()

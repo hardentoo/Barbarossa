@@ -612,48 +612,52 @@ pvSearch nst !a !b !d = do
            reSucc nodes' >> return ttpath
        else do
            -- Use the found TT move as best move
-           let nst' = if hdeep > 0 && (tp /= 0 || nullSeq (pvcont nst))
+           let nst' = if hdeep > 0 && e' /= Move 0 && (tp /= 0 || nullSeq (pvcont nst))
                          then nst { pvcont = Seq [e'] }
                          else nst
-           gedges <- genAndSort nst' a b d
            nodes0 <- gets (sNodes . stats)
+           gedges <- genAndSort nst' a b d
            -- Loop thru the moves
            let !nsti = nst0 { cursc = a, pvcont = tailSeq (pvcont nst') }
            nstf <- pvSLoop b d False nsti gedges
            if movno nstf == 0
-              then do	-- no legal move
-                v <- lift staticVal
-                viztreeScore $ "noMove: " ++ show v
-                let !s = pathFromScore ("static: " ++ show v) v
-                pindent $ "<= " ++ show s
-                return s	-- shouldn't we ttStore this?
+              then do	-- no legal move - it looks like statusVal does not work correctly!
+                  chk <- lift tacticalPos
+                  let s = if chk then matedPath else staleMate
+                  viztreeScore $ "noMove: " ++ show (pathScore s)
+                  pindent $ "<= " ++ show s
+                  return s	-- shouldn't we ttStore this?
               else do	-- here we had legal moves
-                let s = cursc nstf
-                pindent $ "<= " ++ show s
-                -- After pvSLoop ... we expect always that s >= a - this must be checked if it is so
-                -- then it makes sense below to take bestPath when failed low (s == a)
-                abrt' <- gets abort
-                if abrt' || s > a
-                   then return s
-                   else do
-                       -- here we failed low
-                       let de = max d $ pathDepth s
-                           es = unseq $ pathMoves s
-                       when (de >= minToStore && not (null es)) $ do	-- what if es is null?
-                           nodes1 <- gets (sNodes . stats)
-                           -- store as upper score, and as move, the first one generated
-                           lift $ do
-                               let typ = 0
-                                   !deltan = nodes1 - nodes0
-                               ttStore de typ (pathScore a) (head es) deltan	-- should be d or de?
-                       return $! bestPath s a
-                       -- This can't be anymore:
-                       -- if movno nstf > 1
-                       --     then return $! bestPath s a
-                       --     else do
-                       --         chk <- lift tacticalPos
-                       --         let s' = if chk then matedPath else staleMate
-                       --         return $! trimaxPath a b s'	-- shouldn't we ttStore this?
+                  let s = cursc nstf
+                  pindent $ "<= " ++ show s
+                  -- After pvSLoop ... we expect always that s >= a - this must be checked if it is so
+                  -- then it makes sense below to take bestPath when failed low (s == a)
+                  abrt' <- gets abort
+                  if abrt' || s > a
+                     then return s
+                     else do
+                         -- here we failed low
+                         let de = max d $ pathDepth s
+                         when (de >= minToStore) $ do
+                              nodes1 <- gets (sNodes . stats)
+                              lift $ do
+                                  let es = unseq $ pathMoves s
+                                      mv = if null es then Move 0 else head es
+                                  {--
+                                  mv <- if null es
+                                           then do
+                                               -- logmes $ "Failed low (P) with empty path: " ++ show s
+                                               mr <- getNextMove gedges
+                                               case mr of
+                                                   Nothing     -> return $ Move 0 -- this shouldn't happen
+                                                   Just (m, _) -> return m
+                                           else return (head es)
+                                  --}
+                                  -- store as upper score, and as move, the first one generated
+                                  let typ = 0
+                                      !deltan = nodes1 - nodes0
+                                  ttStore de typ (pathScore a) mv deltan	-- should be d or de?
+                         return $! bestPath s a
 
 -- PV Zero Window
 pvZeroW :: NodeState -> Path -> Int -> Int -> Bool -> Search Path
@@ -690,7 +694,7 @@ pvZeroW !nst !b !d !lastnull redu = do
                 return s
               else do
                 -- Use the TT move as best move
-                let nst' = if hdeep > 0 && (tp /= 0 || nullSeq (pvcont nst))
+                let nst' = if hdeep > 0 && e' /= Move 0 && (tp /= 0 || nullSeq (pvcont nst))
                               then nst { pvcont = Seq [e'] }
                               else nst
                 gedges <- genAndSort nst' bGrain b d
@@ -704,33 +708,39 @@ pvZeroW !nst !b !d !lastnull redu = do
                                    cursc = bGrain, pvcont = tailSeq (pvcont nst') }
                 nstf <- pvZLoop b d prune redu nsti gedges
                 if movno nstf == 0
-                   then do	-- no legal move
-                     v <- lift staticVal
-                     viztreeScore $ "noMove: " ++ show v
-                     let !s = pathFromScore ("static: " ++ show v) v
-                     pindent $ "<= " ++ show s
-                     return s	-- shouldn't we ttStore this?
+                   then do	-- no legal move - staticVal seem not to work
+                       chk <- lift tacticalPos
+                       let s = if chk then matedPath else staleMate
+                       viztreeScore $ "noMove: " ++ show (pathScore s)
+                       pindent $ "<= " ++ show s
+                       return s	-- shouldn't we ttStore this?
                    else do
-                     let s = cursc nstf
-                     -- Here we expect bGrain <= s < b -- this must be checked
-                     pindent $ "<: " ++ show s
-                     let !de = max d $ pathDepth s
-                         es = unseq $ pathMoves s
-                     when (de >= minToStore && s < b && not (null es)) $ do	-- we failed low
-                         !nodes1 <- gets (sNodes . stats)	-- what if es is null?
-                         -- store as upper score, and as move the first one (generated)
-                         lift $ do
-                             let typ = 0
-                                 !deltan = nodes1 - nodes0
-                             ttStore de typ (pathScore b) (head es) deltan
-                     return s
-                     -- This is always true:
-                     -- if s > bGrain || movno nstf > 1
-                     --    then return s
-                     --    else do	-- here: store exact mate or stalemate score!
-                     --        chk <- lift tacticalPos
-                     --        let s' = if chk then matedPath else staleMate
-                     --        return $! trimaxPath bGrain b s'
+                       let s = cursc nstf
+                       -- Here we expect bGrain <= s < b -- this must be checked
+                       pindent $ "<: " ++ show s
+                       let !de = max d $ pathDepth s
+                       when (de >= minToStore && s < b) $ do	-- we failed low, store it in TT
+                           !nodes1 <- gets (sNodes . stats)
+                           lift $ do
+                               let es = unseq $ pathMoves s
+                                   mv = if null es then Move 0 else head es
+                               {--
+                               mv <- if null es
+                                        then do
+                                            -- logmes $ "Failed low (P) with empty path: " ++ show s
+                                            mr <- getNextMove gedges
+                                            case mr of
+                                                Nothing     -> return $ Move 0 -- this shouldn't happen
+                                                Just (m, _) -> return m
+                                        else return (head es)
+                               --}
+                               -- store as upper score, and as move the first one (generated)
+                               let typ = 0
+                                   !deltan = nodes1 - nodes0
+                               ttStore de typ (pathScore b) mv deltan
+                       if s > bGrain
+                          then return $! bestPath s b
+                          else return $! bestPath s bGrain
     where bGrain = b -: scoreGrain
 
 nullEdgeFailsHigh :: NodeState -> Path -> Int -> Int -> Search Bool
@@ -1126,7 +1136,9 @@ pvQSearch !a !b = do
     if tact
        then do
            g <- lift genTactMoves	-- in check it generates all escapes
-           pvQLoop b stp a g	-- if no move: I'm mated
+           (n, s) <- pvQLoop b (0, a) g
+           -- if no move: I'm mated
+           if n == 0 then return (-mateScore) else return s
        else if qsBetaCut && stp >= b
                then do
                    lift $ finNode "BETA" False
@@ -1137,54 +1149,50 @@ pvQSearch !a !b = do
                            return a
                        else do
                            g <- lift genTactMoves
-                           if stp > a	-- if no move: patt
-                              then pvQLoop b stp stp g
-                              else pvQLoop b a   a   g
+                           (n, s) <- if stp > a
+                              then pvQLoop b (0, stp) g
+                              else pvQLoop b (0, a)   g
+                           return s	-- should we try other moves here too?
 
-pvQLoop :: Int -> Int -> Int -> MGen -> Search Int
+pvQLoop :: Int -> (Int, Int) -> MGen -> Search (Int, Int)
 pvQLoop b = go
-    where go !def !s g = do
+    where go (n, s) g = do
               mr <- lift $ getNextMove g
               case mr of
-                  Nothing      -> return def
+                  Nothing      -> return (n, s)
                   Just (e, g') -> do
-                      (!cut, !s') <- pvQInnerLoop b s e
-                      if cut then return s'
-                             else go s' s' g'
+                      (!cut, (!n', !s')) <- pvQInnerLoop b (n, s) e
+                      if cut then return (n', s')
+                             else go (n', s') g'
 
-pvQInnerLoop :: Int -> Int -> Move -> Search (Bool, Int)
-pvQInnerLoop !b !a e = do
-    abrt <- timeToAbort
-    if abrt
-       then return (True, b)	-- it doesn't matter which score we return
-       else do
-         -- here: delta pruning: captured piece + 200 > a? then go on, else return
-         -- qindent $ "-> " ++ show e
-         r <- lift $ doMove False e True
-         if legalResult r
-            then do
-                nn <- newNodeQS
-                viztreeDown nn e
-                !sc <- case r of
-                           Final sc -> do
-                               viztreeScore $ "Final: " ++ show sc
-                               return (-sc)
-                           _        -> do
-                             modify $ \s -> s { absdp = absdp s + 1 }
-                             !sc <- pvQSearch (-b) (-a)
-                             modify $ \s -> s { absdp = absdp s - 1 }	-- no usedext here
-                             return (-sc)
-                lift undoMove
-                viztreeUp nn e sc
-                -- qindent $ "<- " ++ show e ++ " (" ++ show s ++ ")"
-                if sc >= b
-                   then return (True, b)
-                   else do
-                       !abrt' <- gets abort
-                       if sc > a
-                          then return (abrt', sc)
-                          else return (abrt', a)
-            else return (False, a)
+pvQInnerLoop :: Int -> (Int, Int) -> Move -> Search (Bool, (Int, Int))
+pvQInnerLoop !b (!n, !a) e = do
+    -- qindent $ "-> " ++ show e
+    r <- lift $ doMove False e True
+    if legalResult r
+       then do
+           nn <- newNodeQS
+           viztreeDown nn e
+           !sc <- case r of
+                      Final sc -> do
+                          viztreeScore $ "Final: " ++ show sc
+                          return (-sc)
+                      _        -> do
+                        modify $ \s -> s { absdp = absdp s + 1 }
+                        !sc <- pvQSearch (-b) (-a)
+                        modify $ \s -> s { absdp = absdp s - 1 }	-- no usedext here
+                        return (-sc)
+           lift undoMove
+           viztreeUp nn e sc
+           -- qindent $ "<- " ++ show e ++ " (" ++ show s ++ ")"
+           if sc >= b
+              then return (True, (n+1, b))
+              else do
+                  !abrt' <- gets abort
+                  if sc > a
+                     then return (abrt', (n+1, sc))
+                     else return (abrt', (n+1, a))
+       else return (False, (n, a))
 
 {-# INLINE bestMoveFromIID #-}
 bestMoveFromIID :: NodeState -> Path -> Path -> Int -> Search [Move]
@@ -1283,10 +1291,6 @@ incReBe n = modStat $ \s -> s { sReBe = sReBe s + n }
 incReMi :: Search ()
 incReMi = modStat $ \s -> s { sReMi = sReMi s + 1 }
 
-pindent :: String -> Search ()
-pindent = indentPassive
--- pindent = indentActive
-
 -- activate when used
 -- qindent :: String -> Search ()
 -- qindent = indentPassive
@@ -1296,6 +1300,10 @@ indentActive :: String -> Search ()
 indentActive s = do
     ad <- gets absdp
     lift $ logmes $ replicate ad ' ' ++ s
+
+pindent :: String -> Search ()
+pindent = indentPassive
+--pindent = indentActive
 
 indentPassive :: String -> Search ()
 indentPassive _ = return ()
