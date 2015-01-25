@@ -99,7 +99,7 @@ genMoves depth absdp pv = do
                         || not pv && depth >= depthForMovesSort
                         then makeGameGen $ sortMovesFromHist l3
                         else makePureGen l3
-            return $ (makePureGen $ l1 ++ l2w ++ l2l, makeListGen [makePureGen l0, g3 ])
+            return (makePureGen $ l1 ++ l2w ++ l2l, makeListGen [makePureGen l0, g3 ])
 
 -- Generate only tactical moves, i.e. promotions, captures & check escapes
 genTactMoves :: Game MGen

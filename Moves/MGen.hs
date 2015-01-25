@@ -14,12 +14,7 @@ import Data.List
 -- import System.Random
 
 import Moves.BaseTypes
-import Search.AlbetaTypes
 import Struct.Struct
-
-depthForMovesSortPv, depthForMovesSort :: Int
-depthForMovesSortPv = 1	-- use history for sorting moves when pv or cut nodes
-depthForMovesSort   = 1	-- use history for sorting moves
 
 data MGen = MGPure [Move]
           | MGGame (Game [Move])
@@ -50,7 +45,7 @@ getNextMove (MGFilt [] g) = getNextMove g
 getNextMove (MGFilt ms g) = do
     mr <- getNextMove g
     case mr of
-        Nothing -> return Nothing
+        Nothing      -> return Nothing
         Just (m, g') -> if m `elem` ms
                            then getNextMove (MGFilt (delete m ms) g')
                            else return $ Just (m, MGFilt ms g')
