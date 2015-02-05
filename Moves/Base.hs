@@ -173,7 +173,10 @@ moveScore m = do
     case res of
         Illegal -> return (m, maxBound)
         _       -> do
-            sc  <- gets (staticScore . head . stack)	-- don't negate! Ascending sort!
+            (dpth, tp, tsc, _, _) <- ttRead
+            sc <- if dpth >= 0 && tp > 0
+                     then return tsc
+                     else gets (staticScore . head . stack)	-- don't negate! Ascending sort!
             undoMove
             return (m, sc)
 
