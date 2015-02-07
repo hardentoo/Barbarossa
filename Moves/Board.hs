@@ -43,17 +43,19 @@ fenToAssocs str = go 56 str []
     where go _ [] acc = acc
           go sq (c:cs) acc
               | sq < 0 = acc
-              | c `elem` "PRNBQK" = go (sq+1) cs $ (sq, fcw):acc
-              | c `elem` "prnbqk" = go (sq+1) cs $ (sq, fcb):acc
-              -- | c == '/'  = go (nextline sq) cs acc
+              -- | c `elem` "PRNBQK" = go (sq+1) cs $ (sq, fcw):acc
+              -- | c `elem` "prnbqk" = go (sq+1) cs $ (sq, fcb):acc
+              | Just pc <- lookup c letterToPiece
+                  = go (sq+1) cs $ (sq, (White, pc)):acc
+              | Just pc <- lookup (toUpper c) letterToPiece
+                  = go (sq+1) cs $ (sq, (Black, pc)):acc
               | isDigit c = go (skip sq c) cs acc
-              -- | otherwise = go sq cs acc	-- silently ignore other chars
               | otherwise = go (nextline sq) cs acc	-- treat like /
-              where fcw = (White, toPiece c)
-                    fcb = (Black, toPiece $ toUpper c)
+              -- where fcw = (White, toPiece c)
+              --       fcb = (Black, toPiece $ toUpper c)
           skip f c = f + fromIntegral (ord c - ord '0')
           nextline f = f - 16
-          toPiece c = fromJust $ lookup c letterToPiece
+          -- toPiece c = fromJust $ lookup c letterToPiece
 
 letterToPiece :: [(Char, Piece)]
 letterToPiece = [('P', Pawn), ('R', Rook), ('N', Knight), ('B', Bishop),
@@ -780,11 +782,14 @@ doFromToMove m !p | moveIsPromo m
           black = tblack, slide = tslide, kkrq = tkkrq, diag = tdiag,
           epcas = tepcas, zobkey = tzobkey, mater = tmater
       }
-    where src = fromSquare m
+    where col = moving p	-- the new coding does not have correct fromSquare in promotion
+          srank = if col == White then 6 else 1
+          sfile = fromSquare m .&. 0x7	-- see new coding!
+          src = srank `unsafeShiftL` 3 .|. sfile
           dst = toSquare m
-          Busy col Pawn = tabla p src	-- identify the moving color (piece must be pawn)
+          -- Busy col Pawn = tabla p src	-- identify the moving color (piece must be pawn)
           !pie = movePromoPiece m
-          p0 = setPiece src (moving p) pie p
+          p0 = setPiece src col pie p
           tblack = mvBit src dst $ black p0
           tslide = mvBit src dst $ slide p0
           tkkrq  = mvBit src dst $ kkrq p0
