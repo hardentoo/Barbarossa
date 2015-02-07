@@ -168,6 +168,7 @@ data NodeState
           nxtnt  :: !NodeType,	-- expected child node type
           cursc  :: !Path,	-- current alpha value (now plus path & depth)
           movno  :: !Int,	-- current move number
+          spcno  :: !Int,	-- last move number of a special move
           killer :: !Killer,	-- the current killer moves
           pvsl   :: [Pvsl],	-- principal variation list (at root) with node statistics
           pvcont :: Seq Move	-- a pv continuation from the previous iteration, if available
@@ -275,7 +276,9 @@ pvsInit :: PVState
 pvsInit = PVState { ronly = pvro00, absdp = 0, usedext = 0, abort = False, stats = stt0 }
 nst0 :: NodeState
 nst0 = NSt { crtnt = PVNode, nxtnt = PVNode, cursc = pathFromScore "Zero" 0,
-             movno = 1, killer = NoKiller, pvsl = [], pvcont = emptySeq }
+             movno = 1, spcno = 1, killer = NoKiller, pvsl = [], pvcont = emptySeq }
+             -- we start with spcno = 1 as we consider the first move as special
+             -- to avoid in any way reducing the tt move
 
 stt0 :: SStats
 stt0 = SStats { sNodes = 0, sNodesQS = 0, sRetr = 0, sRSuc = 0,
@@ -459,7 +462,7 @@ pvInnerRootExten b d !exd nst =  do
               ++ " mvn " ++ show (movno nst) ++ " next depth " ++ show d1
     let nega = negatePath a
         negb = negatePath b
-    if inPv	-- search of principal variation
+    if inPv || d <= 2	-- search of principal variation
        then do
            viztreeABD (pathScore negb) (pathScore nega) d1
            fmap pnextlev (pvSearch nst negb nega d1)
@@ -535,9 +538,11 @@ checkFailOrPVRoot xstats b d e s nst =  do
                         let sc = pathScore s
                             pa = unseq $ pathMoves s
                         informBest (scoreToExtern sc de) (draft $ ronly sst) pa
-                        when (de >= minToStore) $ lift $ do
-                            let typ = 2	-- best move so far (score is exact)
-                            ttStore de typ sc e nodes'
+                        lift $ do
+                            when (de >= minToStore) $ do
+                                let typ = 2	-- best move so far (score is exact)
+                                ttStore de typ sc e nodes'
+                            betaCut True d (absdp sst) e	-- not really cut, but good move
                         let xpvslg = insertToPvs d pvg (pvsl nst)	-- the good
                             nst1 = nst { cursc = s, nxtnt = nextNodeType (nxtnt nst),
                                          movno = mn + 1, pvsl = xpvslg, pvcont = emptySeq }
@@ -563,7 +568,7 @@ insertToPvs d p ps@(q:qs)
 mustQSearch :: Int -> Int -> Search (Int, Int)
 mustQSearch !a !b = do
     nodes0 <- gets (sNodes . stats)
-    v <- pvQSearch a b 0
+    v <- pvQSearch a b
     nodes1 <- gets (sNodes . stats)
     let deltan = nodes1 - nodes0
     return (v, deltan)
@@ -831,7 +836,9 @@ pvInnerLoopZ b d prune nst e redu = do
                          Exten exd' spc -> do
                            if prune && exd' == 0 && not spc -- don't prune special or extended
                               then return $! onlyScore $! cursc nst	-- prune, return a
-                              else pvInnerLoopExtenZ b d spc exd' nst redu
+                              else if spc
+                                      then pvInnerLoopExtenZ b d spc exd' (resetSpc nst) redu
+                                      else pvInnerLoopExtenZ b d spc exd'           nst  redu
                          Final sco -> do
                              viztreeScore $ "Final: " ++ show sco
                              return $! pathFromScore "Final" (-sco)
@@ -843,6 +850,9 @@ pvInnerLoopZ b d prune nst e redu = do
                 pindent $ "<- " ++ show e ++ " (" ++ show s' ++ ")"
                 checkFailOrPVLoopZ (stats old) b d e s' nst
             else return (False, nst)
+
+resetSpc :: NodeState -> NodeState
+resetSpc nst = nst { spcno = movno nst }
 
 reserveExtension :: Int -> Int -> Search Int
 reserveExtension !uex !exd
@@ -863,7 +873,7 @@ pvInnerLoopExten b d !exd nst = do
            ++ " exd' = " ++ show exd' ++ " mvn " ++ show (movno nst) ++ " next depth " ++ show d1
     let nega = negatePath a
         negb = negatePath b
-    if inPv
+    if inPv || d <= 2
        then do
           viztreeABD (pathScore negb) (pathScore nega) d1
           fmap pnextlev (pvSearch nst negb nega d1)
@@ -897,7 +907,7 @@ pvInnerLoopExtenZ b d spec !exd nst redu = do
     let !d1 = d + exd' - 1	-- this is the normal (unreduced) depth for next search
         -- !d' = if redu && crtnt nst == AllNode
         !d' = if redu
-                 then reduceLmr d1 (pnearmate b) spec exd (movno nst)
+                 then reduceLmr d1 (pnearmate b) spec exd (movno nst - spcno nst)
                  else d1
     pindent $ "depth " ++ show d ++ " nt " ++ show (nxtnt nst)
               ++ " exd' = " ++ show exd' ++ " mvn " ++ show (movno nst) ++ " next depth " ++ show d'
@@ -965,9 +975,11 @@ checkFailOrPVLoop xstats b d e s nst = do
               return (True, nst1)
             else do	-- means: > a && < b
               -- when (nxtnt nst == PVNode || de >= minToStore) $	-- why this || with node type?
-              when (de >= minToStore) $	lift $ do
-                  let typ = 2	-- score is exact
-                  ttStore de typ (pathScore s) e nodes'
+              lift $ do
+                  when (de >= minToStore) $ do
+                      let typ = 2	-- score is exact
+                      ttStore de typ (pathScore s) e nodes'
+                  betaCut True d (absdp sst) e -- not really a cut, but good move here
               let !nst1 = nst { cursc = s, nxtnt = nextNodeType (nxtnt nst),
                                 movno = mn+1, pvcont = emptySeq }
               return (False, nst1)
@@ -1040,10 +1052,10 @@ reduceLmr !d nearmatea !spec !exd !w
     | d <= 3 || w <= lmrMvs3 = d - 2
     | d <= 4 || w <= lmrMvs4 = d - 3
     | otherwise              = d - 4
-    where lmrMvs1  =  5	-- unreduced quiet moves
-          lmrMvs2  =  9	-- reduced by max 1 (2xprev-1)
-          lmrMvs3  = 17	-- reduced by max 2
-          lmrMvs4  = 33	-- reduced by max 3
+    where lmrMvs1  =  4	-- unreduced quiet moves
+          lmrMvs2  =  8	-- reduced by max 1 (2xprev-1)
+          lmrMvs3  = 16	-- reduced by max 2
+          lmrMvs4  = 32	-- reduced by max 3
 
 {--
 -- The UnsafeIx inspired from GHC.Arr (class Ix)
@@ -1100,8 +1112,8 @@ trimax a b x
     | otherwise = x
 
 -- PV Quiescent Search
-pvQSearch :: Int -> Int -> Int -> Search Int
-pvQSearch !a !b c = do				   -- to avoid endless loops
+pvQSearch :: Int -> Int -> Search Int
+pvQSearch !a !b = do				   -- to avoid endless loops
     -- qindent $ "=> " ++ show a ++ ", " ++ show b
     !stp <- lift staticVal				-- until we can recognize repetition
     viztreeScore $ "Static: " ++ show stp
@@ -1114,19 +1126,7 @@ pvQSearch !a !b c = do				   -- to avoid endless loops
               then do
                   lift $ finNode "MATE" False
                   return $! trimax a b stp
-              else if c >= qsMaxChess
-                      then do
-                          viztreeScore $ "endless check: " ++ show inEndlessCheck
-                          lift $ finNode "ENDL" False
-                          return $! trimax a b inEndlessCheck
-                      else do
-                          -- for check extensions in case of very few moves (1 or 2):
-                          -- if 1 move: search even deeper
-                          -- if 2 moves: same depth
-                          -- if 3 or more: no extension
-                          let !esc = lenmax3 $ unalt edges
-                              !nc = c + esc - 2
-                          pvQLoop b nc a edges
+              else pvQLoop b a edges
        else if qsBetaCut && stp >= b
                then do
                    lift $ finNode "BETA" False
@@ -1142,23 +1142,19 @@ pvQSearch !a !b c = do				   -- to avoid endless loops
                                  lift $ finNode "NOCA" False
                                  return $! trimax a b stp
                              else if stp > a
-                                     then pvQLoop b c stp edges
-                                     else pvQLoop b c a   edges
-    where lenmax3 = go 0
-              where go n _ | n == 3 = 3
-                    go n []         = n
-                    go n (_:as)     = go (n+1) as
+                                     then pvQLoop b stp edges
+                                     else pvQLoop b a   edges
 
-pvQLoop :: Int -> Int -> Int -> Alt Move -> Search Int
-pvQLoop b c = go
+pvQLoop :: Int -> Int -> Alt Move -> Search Int
+pvQLoop b = go
     where go !s (Alt [])     = return s
           go !s (Alt (e:es)) = do
-              (!cut, !s') <- pvQInnerLoop b c s e
+              (!cut, !s') <- pvQInnerLoop b s e
               if cut then return s'
                      else go s' $ Alt es
 
-pvQInnerLoop :: Int -> Int -> Int -> Move -> Search (Bool, Int)
-pvQInnerLoop !b c !a e = do
+pvQInnerLoop :: Int -> Int -> Move -> Search (Bool, Int)
+pvQInnerLoop !b !a e = do
     abrt <- timeToAbort
     if abrt
        then return (True, b)	-- it doesn't matter which score we return
@@ -1176,7 +1172,7 @@ pvQInnerLoop !b c !a e = do
                                return (-sc)
                            _        -> do
                              modify $ \s -> s { absdp = absdp s + 1 }
-                             !sc <- pvQSearch (-b) (-a) c
+                             !sc <- pvQSearch (-b) (-a)
                              modify $ \s -> s { absdp = absdp s - 1 }	-- no usedext here
                              return (-sc)
                 lift undoMove
