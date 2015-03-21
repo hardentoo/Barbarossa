@@ -43,7 +43,8 @@ data Options = Options {
         optAFenFile :: Maybe FilePath,	-- annotated fen file for self analysis
         optFOutFile :: Maybe FilePath,	-- output file for filter option
         optServMode :: Bool,		-- run as server
-        optClientOf :: [String]		-- run as client with given servers
+        optClientOf :: [String],	-- run as client with given servers
+        optTargPrm  :: String		-- objective function parameters
     }
 
 defaultOptions :: Options
@@ -55,7 +56,8 @@ defaultOptions = Options {
         optAFenFile = Nothing,
         optFOutFile = Nothing,
         optServMode = False,
-        optClientOf = []
+        optClientOf = [],
+        optTargPrm  = "H0.0273"
     }
 
 setConfFile :: String -> Options -> Options
@@ -90,6 +92,9 @@ addServ opt = opt { optServMode = True }
 addHost :: String -> Options -> Options
 addHost cl opt = opt { optClientOf = cl : optClientOf opt }
 
+setTargPrm :: String -> Options -> Options
+setTargPrm tps opt = opt { optTargPrm = tps }
+
 options :: [OptDescr (Options -> Options)]
 options = [
         Option "c" ["config"] (ReqArg setConfFile "STRING") "Configuration file",
@@ -99,7 +104,8 @@ options = [
         Option "t" ["threads"] (ReqArg addNThrds "STRING")  "Number of threads",
         Option "f" ["filter"] (ReqArg addOFile "STRING")    "Filter output file",
         Option "s" ["server"] (NoArg  addServ          )    "Run as server",
-        Option "h" ["hosts"]  (ReqArg addHost "STRING")     "Run as client with this list of servers, comma separated"
+        Option "h" ["hosts"]  (ReqArg addHost "STRING")     "Run as client with this list of servers, comma separated",
+        Option "g" ["target"] (ReqArg setTargPrm "STRING")  "Set target (objective function) patameters"
     ]
 
 theOptions :: IO (Options, [String])
@@ -159,9 +165,11 @@ main = withSocketsDo $ do
                 else clientMode (optClientOf opts) (optParams opts)
             Just fi -> case optFOutFile opts of
                 Just fo -> filterFile fi fo
-                Nothing -> if optServMode opts
-                    then serverMode fi (optNThreads opts)
-                    else optFromFile fi (optNThreads opts)
+                Nothing -> do
+                    let tp = targetParams opts
+                    if optServMode opts
+                       then serverMode  fi (optNThreads opts) tp
+                       else optFromFile fi (optNThreads opts) tp
     -- hSetBuffering stdout LineBuffering
     runReaderT action ctx
 
@@ -175,8 +183,8 @@ filterFile fi fo = do
     mapM_ (makeMovePos crts (Just h)) $ lines inp
     liftIO $ hClose h
 
-optFromFile :: FilePath -> Int -> CtxIO ()
-optFromFile fi n = do
+optFromFile :: FilePath -> Int -> TargetParams -> CtxIO ()
+optFromFile fi n tp = do
     inp <- liftIO $ readFile fi
     lift $ putStrLn $ "Optimizing over " ++ fi
     chg <- readChanging
@@ -185,13 +193,13 @@ optFromFile fi n = do
     if n > 1
        then do
            liftIO $ setNumCapabilities $ n + 1
-           agr <- parallelAgregate (spread n mss) (agregMVar Nothing)
+           agr <- parallelAgregate (spread n mss) (agregMVar tp Nothing)
            liftIO $ showAgr agr
            -- liftIO $ putStrLn $ "Function value: " ++ show r
        else do
            liftIO $ setNumCapabilities 2
            liftIO $ putStrLn $ "Optimise with 1 thread"
-           agr <- agregAll Nothing mss
+           agr <- agregAll tp Nothing mss
            liftIO $ showAgr agr
 
 showAgr :: Agreg -> IO ()
@@ -243,8 +251,8 @@ askServer params mvar host = liftIO $ do
         !n = read vn
     putMVar mvar $! Agreg { agrCumErr = d, agrCumNds = n }
 
-serverMode :: FilePath -> Int -> CtxIO ()
-serverMode fi n = do
+serverMode :: FilePath -> Int -> TargetParams -> CtxIO ()
+serverMode fi n tp = do
     lift $ putStrLn $ "Optimizing over " ++ fi
     liftIO $ setNumCapabilities $ n + 1
     chg <- readChanging
@@ -259,7 +267,7 @@ serverMode fi n = do
             let paramList = stringToParams $ concat $ intersperse "," params
             (_, evs) <- makeEvalState Nothing paramList "progver" "progsuf"	-- no config file
             return (h, evs)
-        agr <- parallelAgregate ts (agregMVar $ Just es)
+        agr <- parallelAgregate ts (agregMVar tp $ Just es)
         liftIO $ hPutStrLn h $ serverPrefix ++ show (agrCumErr agr) ++ " " ++ show (agrCumNds agr)
 
 -- Read lines until one condition occurs
@@ -322,21 +330,21 @@ makeMovePos crts mh fenLine = do
                        putStrLn $ "Illegal move"
                    return Nothing
 
-agregAll :: Maybe EvalState -> [(Move, MyState)] -> CtxIO Agreg
-agregAll mest = case mest of
-    Nothing -> foldM agregPos mempty
-    Just es -> foldM agregPos mempty . map (\(m, ms) -> (m, ms { evalst = es }))
+agregAll :: TargetParams -> Maybe EvalState -> [(Move, MyState)] -> CtxIO Agreg
+agregAll tp mest = case mest of
+    Nothing -> foldM (agregPos tp) mempty
+    Just es -> foldM (agregPos tp) mempty . map (\(m, ms) -> (m, ms { evalst = es }))
 
-agregPos :: Agreg -> (Move, MyState) -> CtxIO Agreg
-agregPos agr (m, mystate) = do
-    (e, s) <- runCState (searchTestPos m) mystate
+agregPos :: TargetParams -> Agreg -> (Move, MyState) -> CtxIO Agreg
+agregPos tp agr (m, mystate) = do
+    (e, s) <- runCState (searchTestPos tp m) mystate
     return $! aggregateError agr e (nodes $ stats s)
 
-agregMVar :: Maybe EvalState -> MVar Agreg -> [(Move, MyState)] -> CtxIO ()
-agregMVar mest mvar mss = do
+agregMVar :: TargetParams -> Maybe EvalState -> MVar Agreg -> [(Move, MyState)] -> CtxIO ()
+agregMVar tp mest mvar mss = do
     myd <- liftIO $ myThreadId
     liftIO $ putStrLn $ "Thread " ++ show myd ++ " started"
-    agr <- agregAll mest mss
+    agr <- agregAll tp mest mss
     liftIO $ putMVar mvar agr
     liftIO $ putStrLn $ "Thread " ++ show myd ++ " ended"
 
@@ -357,9 +365,8 @@ debugMes _ = return ()
 dumpMove :: Move -> String
 dumpMove m@(Move w) = show m ++ " (0x" ++ showHex w ")"
 
-heaviside :: Int -> Double
-heaviside x = 1 / (1 + exp (a * fromIntegral x))
-    where a = 0.0273
+heaviside :: Double -> Int -> Double
+heaviside a x = 1 / (1 + exp (a * fromIntegral x))
 
 correctMove :: MyPos -> Move -> Move
 correctMove p m'
@@ -377,17 +384,57 @@ canDoMove m = do
         Illegal -> return False
         _       -> return True
 
--- We change the error definition and do not use the heaviside function
--- becase we dont need in our optimisation method (ASA) smooth functions
--- So we penalize just the number of moves better then our best move
+-- We parametrise the error definition with these options:
+-- 1. use the heaviside function as in th original MMTO paper
+-- 2. new method (non continous function) in which we
+-- penalize just the number of moves better then our best move
 -- by more then a threshold
--- We have 2 possibilities:
--- 1. the threshold can be fixed for one optimisation
--- 2. the threshold can depend on number of nodes searched in that position
+-- We have here also 2 possibilities:
+-- a. the threshold can be fixed for the whole optimisation
+-- b. the threshold can depend on number of nodes searched in that position
 -- When we take the number of searched nodes we can give less weight
 -- to tensioned positions, which are more probably tactical
-searchTestPos :: Move -> Game Double
-searchTestPos m = do
+
+data TargetParams = Heaviside Double	-- scale factor for Heaviside
+                  | Threshold Int	-- fix threshold in cp
+                  | ByNodes Int Double	-- variable threshold params
+
+-- For ByNode we have to calculate the parameters so that
+-- the threshold is k1 cp for 1000 nodes and (k1+k2) cp for 2000 nodes
+-- searched, where k1 and k2 are given as option
+-- k2 cant be higher than 70, otherwise we cant follow the logarithmic function
+-- The variable threshold logic is like this:
+-- We search one ply for every move, which means ~ 33 * 33 = 1000 positions,
+-- after which we go into quiescence search, so if one position is very quiet,
+-- then we expect around 100 nodes, but more if it is not
+-- Now, in quiet positions, the evaluation should be more precise, in unquite,
+-- not so. So we will not penalise the unquiet positions too much
+-- Our error function counts the number of moves with better score -- by a variable threshold
+-- then the preferred move, so we will calculate a higher threshold for un-quiet positions
+-- This will happen logarithmic, and in the target parameter we give the value of the
+-- threshold in cp for 1000 position and the supplement for 2000 positions
+targetParams :: Options -> TargetParams
+targetParams opts
+    | 'H':ss <- tps, Just a  <- isRead ss    = Heaviside a
+    | 'T':ss <- tps, Just k  <- isRead ss    = Threshold k
+    | 'V':ss <- tps, Just kk <- isIntPair ss = uncurry ByNodes $ vtparams kk
+    | otherwise                              = Heaviside 0.0273
+    where tps = optTargPrm opts
+          multip x = let k = 10 ** (fromIntegral x / 100)
+                     in (k-1)/(2-k)
+          addit a b = a - round (100 * log (1+b))
+          vtparams (k1, k2) = let b = multip k2
+                                  a = addit k1 b
+                              in (a, b)
+          isRead s | (a, ""):[] <- reads s = Just a
+                   | otherwise             = Nothing
+          isIntPair s | (s1, ',':s2) <- break ((==) ',') s,
+                        Just k1 <- isRead s1,
+                        Just k2 <- isRead s2   = Just (k1, k2)
+                      | otherwise              = Nothing
+
+searchTestPos :: TargetParams -> Move -> Game Double
+searchTestPos tp m = do
     mvs' <- uncurry (++) <$> genMoves 0 0 False	-- don't need sort
     let mvs = delete m mvs'
     -- liftIO $ putStrLn $ "Pref move: " ++ dumpMove m
@@ -414,14 +461,20 @@ searchTestPos m = do
                    return 0
                Just s  -> do
                   ss <- mapM searchAB mvs
-                  n1 <- gets $ nodes . stats
-                  -- For the variable threshold:
-                  -- we search 1 ply per move, i.e. we expect 1000 nodes without QS
-                  -- for this stiuation we give a threshold of 100 * log 2 = 70 cp
-                  -- for double of that it means 100 * log 3 = 110 cp, a.s.o.
-                  let nthrs = round $ 100 * log (1 + fromIntegral (n1 - n0) / 1000 :: Double)
-                      !s' = s + nthrs
-                  return $! sum $ map (\x -> if x > s' then 1 else 0) $ catMaybes ss
+                  case tp of
+                      Heaviside a -> return $! sum $ map (\x -> heaviside a (s-x)) $ catMaybes ss
+                      Threshold k -> return $! sum $ map (higher (s+k)) $ catMaybes ss
+                      ByNodes k a -> do
+                          n1 <- gets $ nodes . stats
+                          -- For the variable threshold:
+                          -- we search 1 ply per move, i.e. we expect 1000 nodes without QS
+                          -- for this stiuation we give a threshold of k1 (100 * log 2 = 70 cp)
+                          -- for double of that we give k2 (it means 100 * log 3 = 110 cp, a.s.o.)
+                          let nthrs = (k +) . round $ 100 * log (1 + a * fromIntegral (n1 - n0) / 1000)
+                              !s' = s + nthrs
+                          return $! sum $ map (higher s') $ catMaybes ss
+    where higher s x | x > s     = 1
+                     | otherwise = 0
 
 -- We need this so that we can negate safely:
 minScore, maxScore :: Int

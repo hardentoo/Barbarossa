@@ -2,6 +2,7 @@
 {-# LANGUAGE DeriveDataTypeable #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE TemplateHaskell #-}
 
 module Main where
 import Control.Monad
@@ -17,6 +18,7 @@ import System.Console.GetOpt
 import System.Environment (getArgs)
 import System.IO
 import System.Time
+import Git.Embed
 
 import Struct.Struct
 import Struct.Status
@@ -38,7 +40,7 @@ progName, progVersion, progVerSuff, progAuthor :: String
 progName    = "Barbarossa"
 progAuthor  = "Nicu Ionita"
 progVersion = "0.3.0"
-progVerSuff = "bap3"
+progVerSuff = $(embedGitBranch)
 
 data Options = Options {
         optConfFile :: Maybe String,	-- config file

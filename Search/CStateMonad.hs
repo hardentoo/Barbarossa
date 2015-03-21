@@ -10,14 +10,11 @@
 -- otherwise it will be compiled lazy
 module Search.CStateMonad (
     CState,
-    -- return, (>>=),
-    -- get, put,
     gets, modify,
-    -- lift,
-    -- liftIO,
     runCState, execCState
     ) where
 
+import Control.Applicative
 import Control.Monad
 import Control.Monad.State hiding (gets, modify)
 
@@ -25,6 +22,10 @@ newtype CState s m a = CState { runSTPlus :: forall r. s -> (a -> s -> m r) -> m
 
 instance Functor (CState s m) where
     fmap f c = c >>= return . f
+
+instance Applicative (CState s m) where
+    pure = return
+    (<*>) = ap
 
 -- At least with GHC 7.4.1, we have:
 -- the construct: case f a of fa -> ... is lazy, to make it strict, do
@@ -60,6 +61,8 @@ runCState :: Monad m => CState s m a -> s -> m (a, s)
 runCState c s = runSTPlus c s $ \a s0 -> return (a, s0)
 {-# INLINE runCState #-}
 
+-- execCState :: forall r (m :: * -> *) a. Monad m => CState r m a -> r -> m r
+execCState :: forall r m a. Monad m => CState r m a -> r -> m r
 execCState ms s = liftM snd $ runCState ms s
 {-# INLINE execCState #-}
 
