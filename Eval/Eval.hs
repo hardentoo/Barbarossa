@@ -669,8 +669,8 @@ data Isolan = Isolan
 instance EvalItem Isolan where
     evalItem _ _ p _ = isolDiff p
     evalItemNDL _  = [
-                      ("isolPawns",  ((-50, -140), (-300, 0))),
-                      ("isolPassed", ((-15,  -35), (-500, 0)))	-- even more malus
+                      ("isolPawns",  ((-152, -91), (-300, 0))),
+                      ("isolPassed", ((  -4, -21), (-500, 0)))	-- even more malus
                      ]
 
 isolDiff :: MyPos -> [Int]
@@ -703,8 +703,8 @@ data FarPawns = FarPawns
 instance EvalItem FarPawns where
     evalItem _ _ p _ = farDiff p
     evalItemNDL _  = [
-                      ("farPawns",  ((-42, -120), (-300, 0))),
-                      ("farPassed", ((-57, -150), (-500, 0)))
+                      ("farPawns",  ((-173, -22), (-300, 0))),
+                      ("farPassed", (( -26, -32), (-500, 0)))
                      ]
 
 farDiff :: MyPos -> IWeights
@@ -784,8 +784,8 @@ data Chains = Chains
 instance EvalItem Chains where
     evalItem _ _ p _ = chainDiff p
     evalItemNDL _  = [
-                      ("pawnChains3", ((20, 40), (0, 400))),
-                      ("pawnChains4", ((40, 80), (0, 800)))
+                      ("pawnChains3", (( 64, 140), (0, 400))),
+                      ("pawnChains4", ((149, 101), (0, 800)))
                      ]
 
 chainDiff :: MyPos -> [Int]
