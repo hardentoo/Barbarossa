@@ -15,9 +15,11 @@ module Moves.Base (
     mateScore,
     finNode,
     showMyPos, logMes,
-    nearmate	-- , special
+    nearmate,
+    pathCost
 ) where
 
+import Data.Array.IArray
 import Data.Bits
 import Data.List
 import Control.Monad.State
@@ -32,6 +34,7 @@ import Struct.Struct
 import Struct.Context
 import Struct.Status
 import Hash.TransTab
+import Hash.Queue
 import Moves.Board
 import Eval.Eval
 import Moves.ShowMe
@@ -75,11 +78,13 @@ posToState p c h e = MyState {
                        hash = c,
                        hist = h,
                        stats = stats0,
-                       evalst = e
+                       evalst = e,
+                       explo = explo'
                    }
     where (stsc, feats) = evalState (posEval p) e
           p'' = p { staticScore = stsc, staticFeats = feats }
           stats0 = Stats { nodes = 0, maxmvs = 0 }
+          explo' = listArray (1, 16) $ repeat $ newQueue 8
 
 posNewSearch :: MyState -> MyState
 posNewSearch p = p { hash = newGener (hash p) }
@@ -445,3 +450,13 @@ timeFromContext = do
     ctx <- ask
     let refs = startSecond ctx
     lift $ currMilli refs
+
+pathCost :: Int -> Int -> Int -> [Move] -> Int -> [Move] -> [Move] -> Int -> Game ()
+pathCost d ply a ap b bp ms ndif = do
+    s <- get
+    let p:_ = stack s
+        ex = Explo { exPos = p, exPly = ply, exAlpha = a, exBeta = b,
+                     exPAlpha = ap, exPBeta = bp, exPRet = ms }
+        q  = addQueue ex ndif $ explo s ! d
+        explo' = explo s // [(d, q)]
+    put s { explo = explo' }

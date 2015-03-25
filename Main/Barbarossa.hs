@@ -23,12 +23,14 @@ import Struct.Status
 import Struct.Context
 import Struct.Config
 import Hash.TransTab
+import Hash.Queue (listQueue)
 import Uci.UCI
 import Uci.UciGlue
 import Moves.Base
 import Moves.Moves (movesInit)
 import Moves.Board (posFromFen, initPos)
 import Moves.History
+import Moves.Notation (posToFen)
 import Search.CStateMonad (execCState)
 import Eval.Eval (weightNames)
 import Eval.FileParams (makeEvalState)
@@ -38,7 +40,7 @@ progName, progVersion, progVerSuff, progAuthor :: String
 progName    = "Barbarossa"
 progAuthor  = "Nicu Ionita"
 progVersion = "0.3.0"
-progVerSuff = "noat1"
+progVerSuff = "noat2"
 
 data Options = Options {
         optConfFile :: Maybe String,	-- config file
@@ -533,6 +535,7 @@ searchTheTree tief mtief timx tim tpm mtg lsc lpv rmvs = do
         then do
             when depthmax $ ctxLog LogInfo "in searchTheTree: max depth reached"
             giveBestMove path
+            reportExplo stfin
             return sc
         else do
             chg' <- readChanging
@@ -543,7 +546,21 @@ searchTheTree tief mtief timx tim tpm mtg lsc lpv rmvs = do
                 else do
                     ctxLog DebugUci "in searchTheTree: not working"
                     giveBestMove path -- was stopped
+                    reportExplo stfin
                     return sc
+
+reportExplo :: MyState -> CtxIO ()
+reportExplo st = forM_ (assocs $ explo st) $ \(d, q) -> do
+    ctxLog LogInfo $ "Search explosion list for depth " ++ show d
+    forM_ (listQueue q) $ \(n, e) -> do
+        ctxLog LogInfo $ "-- Position fen: " ++ posToFen (exPos e)
+        ctxLog LogInfo $ "-- Nodes: " ++ show n ++ " ply " ++ show (exPly e)
+        ctxLog LogInfo $ "-- alpha: " ++ show (exAlpha e) ++ " ["
+            ++ concatMap ((' ' :) . show) (exPAlpha e) ++ " ]"
+        ctxLog LogInfo $ "-- beta:  " ++ show (exBeta  e) ++ " ["
+            ++ concatMap ((' ' :) . show) (exPBeta  e) ++ " ]"
+        ctxLog LogInfo $ "-- path:  " ++ " ["
+            ++ concatMap ((' ' :) . show) (exPRet e) ++ " ]"
 
 -- We assume here that we always have at least the first move of the PV (our best)
 -- If not (which is a fatal error) we will get an exception (head of empty list)

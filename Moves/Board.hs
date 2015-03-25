@@ -783,7 +783,7 @@ perCaptFieldWL pos sq mvlst
           yoattacs = yo pos .&. atAtt myAttRec
           Busy _ pcto = tabla pos sq
           valto = value pcto
-          hanging = not (yoattacs `testBit` sq)
+          hanging = yoattacs == 0
           prAgrsqs = bbToSquares prPawns
           reAgrsqs = bbToSquares reAtts
           (prPawns, reAtts)

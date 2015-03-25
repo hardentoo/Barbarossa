@@ -2,24 +2,35 @@ module Struct.Status (
     Stats(..),
     MyState(..),
     EvalState(..),
-    EvalParams(..)
+    EvalParams(..),
+    Explo(..)
 ) where
+
+import Data.Array.IArray
 
 import Struct.Struct
 import Moves.History
 import Hash.TransTab
+import Hash.Queue
 
 data Stats = Stats {
         nodes :: !Int,
         maxmvs :: !Int
     } deriving Show
 
+data Explo = Explo {
+        exPos :: MyPos,
+        exPly, exAlpha, exBeta :: !Int,
+        exPAlpha, exPBeta, exPRet :: [Move]
+    }
+
 data MyState = MyState {
         stack :: [MyPos],	-- stack of played positions
         hash  :: Cache,		-- transposition table
         hist  :: History,	-- history table
         stats :: !Stats,	-- statistics
-        evalst :: EvalState	-- eval status (parameter & statistics)
+        evalst :: EvalState,	-- eval status (parameter & statistics)
+        explo :: Array Int (Queue Explo)	-- keep information abt search explosion
     }
 
 data EvalState = EvalState {
