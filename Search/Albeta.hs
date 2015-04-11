@@ -141,7 +141,7 @@ data Pvsl = Pvsl {
         pvGood  :: !Bool	-- beta cut or alpha improvement
     } deriving Show
 
-data Killer = NoKiller | OneKiller !Move | TwoKillers !Move !Move
+data Killer = NoKiller | OneKiller !Move | TwoKillers !Move !Move | ThreeKillers !Move !Move !Move
                   deriving (Eq, Show)
 
 -- Read only parameters of the search, so that we can change them programatically
@@ -1389,13 +1389,20 @@ pushKiller !e ok@(OneKiller e1)
     | e == e1   = ok
     | otherwise = TwoKillers e e1
 pushKiller !e tk@(TwoKillers e1 e2)
-    | e == e1 || e == e2 = tk
-    | otherwise          = TwoKillers e e1
+    | e == e1   = tk
+    | e == e2   = TwoKillers e2 e1
+    | otherwise = ThreeKillers e e1 e2
+pushKiller !e tk@(ThreeKillers e1 e2 e3)
+    | e == e1   = tk
+    | e == e2   = ThreeKillers e2 e1 e3
+    | e == e3   = ThreeKillers e3 e1 e2
+    | otherwise = ThreeKillers e e1 e2
 
 killerToList :: Killer -> [Move]
-killerToList  NoKiller          = []
-killerToList (OneKiller e)      = [e]
-killerToList (TwoKillers e1 e2) = [e1, e2]
+killerToList  NoKiller               = []
+killerToList (OneKiller    e)        = [e]
+killerToList (TwoKillers   e1 e2)    = [e1, e2]
+killerToList (ThreeKillers e1 e2 e3) = [e1, e2, e3]
 
 --- Communication to the outside - some convenience functions ---
 
