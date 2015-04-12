@@ -40,7 +40,7 @@ progName, progVersion, progVerSuff, progAuthor :: String
 progName    = "Barbarossa"
 progAuthor  = "Nicu Ionita"
 progVersion = "0.3.0"
-progVerSuff = "noat2"
+progVerSuff = "noat2c"
 
 data Options = Options {
         optConfFile :: Maybe String,	-- config file
@@ -535,7 +535,7 @@ searchTheTree tief mtief timx tim tpm mtg lsc lpv rmvs = do
         then do
             when depthmax $ ctxLog LogInfo "in searchTheTree: max depth reached"
             giveBestMove path
-            reportExplo stfin
+            -- reportExplo stfin
             return sc
         else do
             chg' <- readChanging
@@ -546,7 +546,7 @@ searchTheTree tief mtief timx tim tpm mtg lsc lpv rmvs = do
                 else do
                     ctxLog DebugUci "in searchTheTree: not working"
                     giveBestMove path -- was stopped
-                    reportExplo stfin
+                    -- reportExplo stfin
                     return sc
 
 reportExplo :: MyState -> CtxIO ()

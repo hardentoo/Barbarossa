@@ -431,9 +431,9 @@ pvInnerRoot b d nst e = do
                 modify $ \s' -> s' { absdp = absdp old, usedext = usedext old }
                 let s' = addToPath e s
                 n2 <- gets $ sNodes . stats
-                lift $ pathCost d (absdp old) (pathScore $ cursc nst) (unseq $ pathMoves $ cursc nst)
-                         (pathScore b) (unseq $ pathMoves b) (unseq $ pathMoves s')
-                         (n2 - sNodes (stats old))
+                -- lift $ pathCost d (absdp old) (pathScore $ cursc nst) (unseq $ pathMoves $ cursc nst)
+                --          (pathScore b) (unseq $ pathMoves b) (unseq $ pathMoves s')
+                --          (n2 - sNodes (stats old))
                 pindent $ "<- " ++ show e ++ " (" ++ show s' ++ ")"
                 checkFailOrPVRoot (stats old) b d e s' nst
 
@@ -808,9 +808,9 @@ pvInnerLoop b d prune nst e = do
                 modify $ \s' -> s' { absdp = absdp old, usedext = usedext old }
                 let s' = addToPath e s
                 n2 <- gets $ sNodes . stats
-                lift $ pathCost d (absdp old) (pathScore $ cursc nst) (unseq $ pathMoves $ cursc nst)
-                         (pathScore b) (unseq $ pathMoves b) (unseq $ pathMoves s')
-                         (n2 - sNodes (stats old))
+                -- lift $ pathCost d (absdp old) (pathScore $ cursc nst) (unseq $ pathMoves $ cursc nst)
+                --          (pathScore b) (unseq $ pathMoves b) (unseq $ pathMoves s')
+                --          (n2 - sNodes (stats old))
                 pindent $ "<- " ++ show e ++ " (" ++ show s' ++ ")"
                 checkFailOrPVLoop (stats old) b d e s' nst
 
@@ -849,9 +849,9 @@ pvInnerLoopZ b d prune nst e redu = do
                 modify $ \s' -> s' { absdp = absdp old, usedext = usedext old }
                 let s' = addToPath e s
                 n2 <- gets $ sNodes . stats
-                lift $ pathCost d (absdp old) (pathScore $ cursc nst) (unseq $ pathMoves $ cursc nst)
-                         (pathScore b) (unseq $ pathMoves b) (unseq $ pathMoves s')
-                         (n2 - sNodes (stats old))
+                -- lift $ pathCost d (absdp old) (pathScore $ cursc nst) (unseq $ pathMoves $ cursc nst)
+                --          (pathScore b) (unseq $ pathMoves b) (unseq $ pathMoves s')
+                --          (n2 - sNodes (stats old))
                 pindent $ "<- " ++ show e ++ " (" ++ show s' ++ ")"
                 checkFailOrPVLoopZ (stats old) b d e s' nst
 
