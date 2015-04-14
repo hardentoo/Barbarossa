@@ -701,7 +701,17 @@ pvZeroW !nst !b !d !lastnull redu = do
                     let nst' = if hdeep > 0 && (tp /= 0 || nullSeq (pvcont nst))
                                   then nst { pvcont = Seq [e'] }
                                   else nst
-                    edges <- genAndSort nst' bGrain b d
+                    -- Here we use our response to the null move threat as a killer
+                    -- It looks like this helps
+                    -- This is important only for the move generation (sort)
+                    -- We have also a first killer for the new node: the null move threat
+                    (nst'', kill1) <- case nmhigh of
+                        NullMoveThreat s -> do
+                            kill0 <- newKiller d s nst'
+                            kill1 <- newTKiller d s
+                            return (nst' { killer = kill0 }, kill1) 
+                        _                -> return (nst', NoKiller)
+                    edges <- genAndSort nst'' bGrain b d
                     if noMove edges
                        then do
                          v <- lift staticVal
@@ -716,9 +726,6 @@ pvZeroW !nst !b !d !lastnull redu = do
                                      then return False
                                      else isPruneFutil d bGrain	-- was a
                          -- Loop thru the moves
-                         kill1 <- case nmhigh of
-                                      NullMoveThreat s -> newTKiller d s
-                                      _                -> return NoKiller
                          let !nsti = resetNSt bGrain kill1 nst'
                          nstf <- pvZLoop b d prune redu nsti edges
                          let s = cursc nstf
@@ -741,19 +748,19 @@ pvZeroW !nst !b !d !lastnull redu = do
                                 return $! trimaxPath bGrain b s'
     where bGrain = b -: scoreGrain
 
-data NullMoveResult = NoNullMove | NullMoveHigh | NullMoveLow | NullMoveThreat Path
+data NullMoveResult = NullMoveNR | NullMoveHigh | NullMoveThreat Path
 
 nullMoveFailsHigh :: NodeState -> Path -> Int -> Int -> Search NullMoveResult
 nullMoveFailsHigh nst b d lastnull
-    | not nulActivate || lastnull < 1 = return NoNullMove	-- go smooth into QS
+    | not nulActivate || lastnull < 1 = return NullMoveNR	-- go smooth into QS
     | otherwise = do
          tact <- lift tacticalPos
          if tact
-            then return NoNullMove
+            then return NullMoveNR
             else do
                v <- lift staticVal
                if v < pathScore b + nulTrig * scoreGrain
-                  then return NoNullMove
+                  then return NullMoveNR
                   else do
                       when nulDebug $ incReBe 1
                       lift doNullMove	-- do null move
@@ -773,7 +780,7 @@ nullMoveFailsHigh nst b d lastnull
                                       finNode "NMLO" True
                                       logmes $ "fail low path: " ++ show val
                               if nullSeq (pathMoves val)
-                                 then return $ NullMoveLow
+                                 then return $ NullMoveNR
                                  else return $ NullMoveThreat val
     where d1  = d - (1 + nulRedux)
           nmb = if nulSubAct then b -: (nulSubmrg * scoreGrain) else b
