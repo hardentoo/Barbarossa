@@ -72,13 +72,13 @@ futilActive :: Bool
 futilActive = True
 
 maxFutilDepth :: Int
-maxFutilDepth = 3
+maxFutilDepth = 1
 
 -- This is a linear formula for futility margin
 -- Should apply from 1 to maxFutilDepth (checked elsewehere)
 futilMs, futilMv :: Int
-futilMs = 275	-- margin for depth 1
-futilMv = 150	-- suplementary margin for every further depth
+futilMs = 350	-- margin for depth 1
+futilMv =   0	-- suplementary margin for every further depth
 futilMargins :: Int -> Int
 futilMargins d = futilMs - futilMv + d*futilMv
 -- futilMargins d = futilMs + ((d-1) `unsafeShiftR` 1) * futilMv
@@ -99,7 +99,7 @@ nulMoves    = 2	-- how many null moves in sequence are allowed (one or two)
 nulMargin, nulSubmrg, nulTrig :: Int
 nulMargin   = 1		-- margin to search the null move (over beta) (in scoreGrain units!)
 nulSubmrg   = 2		-- improved margin (in scoreGrain units!)
-nulTrig     = -15	-- static margin to beta, to trigger null move (in scoreGrain units!)
+nulTrig     = 80	-- static margin to beta, to trigger null move (in scoreGrain units!)
 nulSubAct :: Bool
 nulSubAct   = True
 
@@ -590,7 +590,7 @@ pvSearch nst !a !b !d = do
          || tp == 1 && hsc >= pathScore b	-- we will fail high
          || tp == 0 && hsc <= pathScore a	-- we will fail low
        )
-       then  do
+       then do
            let ttpath = Path { pathScore = hsc, pathDepth = hdeep,
                                pathMoves = Seq [e'], pathOrig = "TT" }
            reSucc nodes' >> return ttpath
@@ -738,7 +738,7 @@ nullEdgeFailsHigh nst b d lastnull
          if tact
             then return False
             else do
-               v <- lift staticVal	-- materVal	-- we use now material diff here
+               v <- lift materVal	-- we use now material diff here
                if v < pathScore b + nulTrig * scoreGrain
                   then return False
                   else do
@@ -1083,9 +1083,7 @@ isPruneFutil d a
     | otherwise = do
         tact <- lift tacticalPos
         if tact then return False else do
-            v <- lift staticVal	-- E1
-            -- v <- pvQSearch a' b' 0	-- E2
-            -- v <- lift materVal	-- can we use here material diff? Theory says: no
+            v <- lift materVal	-- can we use here material diff? Theory says: no
             let margin = futilMargins d	-- we need higher futil margins if we use material only
             return $! v + margin <= pathScore a
 
