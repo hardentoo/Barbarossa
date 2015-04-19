@@ -109,7 +109,7 @@ data AnyEvalItem = forall a . EvalItem a => EvIt a
 evalItems :: [AnyEvalItem]
 evalItems = [ -- EvIt Material,	-- material balance (i.e. white - black material
               EvIt Redundance,	-- bishop pair and rook redundance
-              EvIt RookPawn,	-- the rook pawns are about 15% less valuable
+              -- EvIt RookPawn,	-- the rook pawns are about 15% less valuable
               EvIt KingSafe,	-- king safety
               EvIt KingOpen,	-- malus for king openness
               EvIt KingPlace,	-- bonus when king is near some fields
@@ -440,7 +440,7 @@ data KingPlace = KingPlace
 instance EvalItem KingPlace where
     evalItem _ ep p _  = kingPlace ep p
     evalItemNDL _ = [
-                      ("kingPlaceCent", ((5,  0), (0, 20))),
+                      -- ("kingPlaceCent", ((5,  0), (0, 20))),
                       ("kingPlacePwns", ((0, 30), (0, 40)))
                     ]
 
@@ -449,11 +449,13 @@ instance EvalItem KingPlace where
 -- where the king should be placed. For example, in the opening and middle game it should
 -- be in some corner, in endgame it should be near some (passed) pawn(s)
 kingPlace :: EvalParams -> MyPos -> IWeights
-kingPlace ep p = [ kcd, kpd ]
-    where !kcd = (mpl - ypl) `unsafeShiftR` epMaterBonusScale ep
+-- kingPlace ep p = [ kcd, kpd ]
+kingPlace ep p = [ kpd ]
+    where -- !kcd = (mpl - ypl) `unsafeShiftR` epMaterBonusScale ep
           !kpd = (mpi - ypi) `unsafeShiftR` epPawnBonusScale  ep
           !mks = kingSquare (kings p) $ me p
           !yks = kingSquare (kings p) $ yo p
+          {--
           !mkm = materFun yminor yrooks yqueens
           !ykm = materFun mminor mrooks mqueens
           (!mpl, !ypl, !mpi, !ypi)
@@ -477,10 +479,18 @@ kingPlace ep p = [ kcd, kpd ]
           !yminor  = popCount $ (bishops p .|. knights p) .&. yo p
           !mpawns  = pawns p .&. me p
           !ypawns  = pawns p .&. yo p
+          --}
+          (!mpi, !ypi)
+              | moving p == White = ( kingPawnsBonus mks (passed p) mpassed ypassed
+                                    , kingPawnsBonus yks (passed p) mpassed ypassed
+                                    )
+              | otherwise         = ( kingPawnsBonus mks (passed p) ypassed mpassed
+                                    , kingPawnsBonus yks (passed p) ypassed mpassed
+                                    )
           !mpassed = passed p .&. me p
           !ypassed = passed p .&. yo p
-          materFun m r q = (m * epMaterMinor ep + r * epMaterRook ep + q * epMaterQueen ep)
-                               `unsafeShiftR` epMaterScale ep
+          -- materFun m r q = (m * epMaterMinor ep + r * epMaterRook ep + q * epMaterQueen ep)
+          --                      `unsafeShiftR` epMaterScale ep
 
 promoW, promoB :: Square -> Square
 promoW s = 56 + (s .&. 7)
@@ -498,6 +508,7 @@ kingPawnsBonus !ksq !alp !wpass !bpass = bonus
                        $ map promoW (bbToSquares wpass) ++ map promoB (bbToSquares bpass)
           !bonus = bpsqs + bqsqs
 
+{--
 -- This is a bonus for the king beeing near one corner
 -- It's bigger when the enemy has more material (only pieces)
 -- and when that corner has a pawn shelter
@@ -536,13 +547,14 @@ kingMaterBonus c !myp !mat !ksq
           shBA7 = row7 .&. (fileA .|. fileB .|. fileC)
           shBH6 = row6 .&. (fileF .|. fileG .|. fileH)
           shBH7 = row7 .&. (fileF .|. fileG .|. fileH)
+--}
 
 -- Make it longer, for artificially increased distances
 proxyBonusArr :: UArray Int Int    -- 0   1  2  3  4  5  6  7
 proxyBonusArr = listArray (0, 15) $ [55, 20, 8, 4, 3, 2, 1] ++ repeat 0
 
-matKCArr :: UArray Int Int   -- 0              5             10
-matKCArr = listArray (0, 63) $ [0, 0, 0, 1, 1, 2, 3, 4, 5, 7, 9, 10, 11, 12] ++ repeat 12
+-- matKCArr :: UArray Int Int   -- 0              5             10
+-- matKCArr = listArray (0, 63) $ [0, 0, 0, 1, 1, 2, 3, 4, 5, 7, 9, 10, 11, 12] ++ repeat 12
 
 proxyBonus :: Int -> Int
 proxyBonus = unsafeAt proxyBonusArr
@@ -627,23 +639,24 @@ data Center = Center
 instance EvalItem Center where
     evalItem _ _ p _ = centerDiff p
     evalItemNDL _  = [
-                      ("centerPAtts", ((70, 60), (0, 200))),
-                      ("centerNAtts", ((57, 45), (0, 200))),
+                      -- ("centerPAtts", ((70, 60), (0, 200))),
+                      -- ("centerNAtts", ((57, 45), (0, 200))),
                       ("centerBAtts", ((57, 45), (0, 200))),
                       ("centerRAtts", ((17, 30), (0, 200))),
-                      ("centerQAtts", (( 4, 60), (0, 200))),
-                      ("centerKAtts", (( 0, 70), (0, 200)))
+                      ("centerQAtts", (( 4, 60), (0, 200)))
+                      -- ("centerKAtts", (( 0, 70), (0, 200)))
                      ]
 
 -- This function is already optimised
 centerDiff :: MyPos -> IWeights
-centerDiff p = [pd, nd, bd, rd, qd, kd]
-    where !mpa = popCount $ myPAttacs p .&. center
-          !ypa = popCount $ yoPAttacs p .&. center
-          !pd  = mpa - ypa
-          !mna = popCount $ myNAttacs p .&. center
-          !yna = popCount $ yoNAttacs p .&. center
-          !nd  = mna - yna
+-- centerDiff p = [pd, nd, bd, rd, qd, kd]
+centerDiff p = [bd, rd, qd]
+    where -- !mpa = popCount $ myPAttacs p .&. center
+          -- !ypa = popCount $ yoPAttacs p .&. center
+          -- !pd  = mpa - ypa
+          -- !mna = popCount $ myNAttacs p .&. center
+          -- !yna = popCount $ yoNAttacs p .&. center
+          -- !nd  = mna - yna
           !mba = popCount $ myBAttacs p .&. center
           !yba = popCount $ yoBAttacs p .&. center
           !bd  = mba - yba
@@ -653,9 +666,9 @@ centerDiff p = [pd, nd, bd, rd, qd, kd]
           !mqa = popCount $ myQAttacs p .&. center
           !yqa = popCount $ yoQAttacs p .&. center
           !qd  = mqa - yqa
-          !mka = popCount $ myKAttacs p .&. center
-          !yka = popCount $ yoKAttacs p .&. center
-          !kd  = mka - yka
+          -- !mka = popCount $ myKAttacs p .&. center
+          -- !yka = popCount $ yoKAttacs p .&. center
+          -- !kd  = mka - yka
           center = 0x0000001818000000
 
 -------- Isolated pawns --------
@@ -804,11 +817,13 @@ instance EvalItem LastLine where
 
 -- Only for minor figures (queen is free to stay where it wants)
 -- Negative at the end: so that it falls stronger
+-- Now only for bishops, as knights have PST
 lastline :: MyPos -> IWeights
 lastline p = [cdiff]
     where !whl = popCount $ me p .&. cb
           !bll = popCount $ yo p .&. cb
-          !cb = (knights p .|. bishops p) .&. lali
+          -- !cb = (knights p .|. bishops p) .&. lali
+          !cb = bishops p .&. lali
           lali = 0xFF000000000000FF	-- approximation!
           !cdiff = bll - whl
 
@@ -857,6 +872,7 @@ evalNRCorrection p = [md]
 --}
 
 ------ Rook pawn weakness ------
+{--
 data RookPawn = RookPawn
 
 instance EvalItem RookPawn where
@@ -869,6 +885,7 @@ evalRookPawn p = [rps]
     where !wrp = popCount $ pawns p .&. me p .&. rookFiles
           !brp = popCount $ pawns p .&. yo p .&. rookFiles
           !rps = wrp - brp
+--}
 
 ------ Blocked pawns ------
 data PaBlo = PaBlo
