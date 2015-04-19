@@ -334,7 +334,7 @@ finNode str force = do
 materVal :: Game Int
 materVal = do
     t <- getPos
-    let !m = mater t
+    let !m = materM t
     return $! case moving t of
                    White -> m
                    _     -> -m

@@ -296,31 +296,39 @@ kingsOk p = exactOne (kings p .&. me p)
          && exactOne (kings p .&. yo p)
 checkOk p = yo p .&. kings p .&. myAttacs p == 0
 
-data ChangeAccum = CA !ZKey !Int
+data ChangeAccum = CA !ZKey !Int !Int !Int
 
 -- Accumulate a set of changes in MyPos (except BBoards) due to setting a piece on a square
 accumSetPiece :: Square -> Color -> Piece -> MyPos -> ChangeAccum -> ChangeAccum
-accumSetPiece sq c f !p (CA z m)
+accumSetPiece sq c f !p (CA z mm me' ph)
     = case tabla p sq of
-        Empty      -> CA znew mnew
-        Busy co fo -> accumCapt sq co fo znew mnew
-    where !znew = z `xor` zobPiece c f sq
-          !mnew = m + matPiece c f
+        Empty      -> CA (z `xor` zobPiece c f sq)
+                         (mm  + mnewm)
+                         (me' + mnewe)
+                         (ph  + phnew)
+        Busy co fo -> let (moldm, molde) = psqOn co fo sq
+                          phold = gamePhaseVal fo
+                      in CA (z `xor` zobPiece c f sq `xor` zobPiece co fo sq)
+                            (mm  + mnewm - moldm)
+                            (me' + mnewe - molde)
+                            (ph  + phnew - phold)
+    where (mnewm, mnewe) = psqOn c f sq
+          phnew = gamePhaseVal f
 
 -- Accumulate a set of changes in MyPos (except BBoards) due to clearing a square
 accumClearSq :: Square -> MyPos -> ChangeAccum -> ChangeAccum
-accumClearSq sq p i@(CA z m)
+accumClearSq sq p i@(CA z mm me' ph)
     = case tabla p sq of
         Empty      -> i
-        Busy co fo -> accumCapt sq co fo z m
-
-accumCapt :: Square -> Color -> Piece -> ZKey -> Int -> ChangeAccum
-accumCapt sq !co !fo !z !m = CA (z `xor` zco) (m - mco)
-    where !zco = zobPiece co fo sq
-          !mco = matPiece co fo
+        Busy co fo -> let (moldm, molde) = psqOn co fo sq
+                          phold = gamePhaseVal fo
+                      in CA (z `xor` zobPiece co fo sq)
+                            (mm  - moldm)
+                            (me' - molde)
+                            (ph  - phold)
 
 accumMoving :: MyPos -> ChangeAccum -> ChangeAccum
-accumMoving _ (CA z m) = CA (z `xor` zobMove) m
+accumMoving _ (CA z mm me' ph) = CA (z `xor` zobMove) mm me' ph
 
 -- Take an initial accumulation and a list of functions accum to accum
 -- and compute the final accumulation
@@ -472,7 +480,7 @@ doFromToMove :: Move -> MyPos -> MyPos
 doFromToMove m !p | moveIsNormal m
     = updatePos p {
           black = tblack, slide = tslide, kkrq  = tkkrq,  diag  = tdiag,
-          epcas = tepcas, zobkey = tzobkey, mater = tmater
+          epcas = tepcas, zobkey = tzobkey, materM = tmaterm, materE = tmatere, gamePh = tgph
       }
     where src = fromSquare m
           dst = toSquare m
@@ -497,20 +505,21 @@ doFromToMove m !p | moveIsNormal m
                     in ((.|.) epBit, epSetZob epFld)
               | otherwise = (id, 0)
           !zob = zobkey p `xor` epcl `xor` epst `xor` zobcast
-          CA tzobkey tmater = case tabla p src of	-- identify the moving piece
-               Busy col fig -> chainAccum (CA zob (mater p)) [
-                                   accumClearSq src p,
-                                   accumSetPiece dst col fig p,
-                                   accumMoving p
-                               ]
-               _ -> error $ "Src field empty: " ++ show m ++ " in pos\n"
+          CA tzobkey tmaterm tmatere tgph
+              = case tabla p src of	-- identify the moving piece
+                    Busy col fig -> chainAccum (CA zob (materM p) (materE p) (gamePh p)) [
+                                        accumClearSq src p,
+                                        accumSetPiece dst col fig p,
+                                        accumMoving p
+                                    ]
+                    _ -> error $ "Src field empty: " ++ show m ++ " in pos\n"
                                  ++ showTab (black p) (slide p) (kkrq p) (diag p)
                                  ++ "resulting pos:\n"
                                  ++ showTab tblack tslide tkkrq tdiag
 doFromToMove m !p | moveIsEnPas m
     = updatePos p {
           black = tblack, slide = tslide, kkrq  = tkkrq,  diag  = tdiag,
-          epcas = tepcas, zobkey = tzobkey, mater = tmater
+          epcas = tepcas, zobkey = tzobkey, materM = tmaterm, materE = tmatere, gamePh = tgph
       }
     where src = fromSquare m
           dst = toSquare m
@@ -526,7 +535,8 @@ doFromToMove m !p | moveIsEnPas m
           -- Busy _   Pawn = tabla p del	-- identify the captured piece (pawn)
           !epcl = epClrZob $ epcas p
           !zk = zobkey p `xor` epcl
-          CA tzobkey tmater = chainAccum (CA zk (mater p)) [
+          CA tzobkey tmaterm tmatere tgph
+              = chainAccum (CA zk (materM p) (materE p) (gamePh p)) [
                                 accumClearSq src p,
                                 accumClearSq del p,
                                 accumSetPiece dst col fig p,
@@ -535,7 +545,7 @@ doFromToMove m !p | moveIsEnPas m
 doFromToMove m !p | moveIsCastle m
     = updatePos p {
           black = tblack, slide = tslide, kkrq  = tkkrq,  diag  = tdiag,
-          epcas = tepcas, zobkey = tzobkey, mater = tmater
+          epcas = tepcas, zobkey = tzobkey, materM = tmaterm, materE = tmatere, gamePh = tgph
       }
     where src = fromSquare m
           dst = toSquare m
@@ -560,7 +570,8 @@ doFromToMove m !p | moveIsCastle m
           Busy co1 Rook = tabla p csr	-- identify the moving rook
           !epcl = epClrZob $ epcas p
           !zob = zobkey p `xor` epcl `xor` zobcast
-          CA tzobkey tmater = chainAccum (CA zob (mater p)) [
+          CA tzobkey tmaterm tmatere tgph
+              = chainAccum (CA zob (materM p) (materE p) (gamePh p)) [
                                 accumClearSq src p,
                                 accumSetPiece dst col King p,
                                 accumClearSq csr p,
@@ -570,7 +581,7 @@ doFromToMove m !p | moveIsCastle m
 doFromToMove m !p | moveIsPromo m
     = updatePos p0 {
           black = tblack, slide = tslide, kkrq = tkkrq, diag = tdiag,
-          epcas = tepcas, zobkey = tzobkey, mater = tmater
+          epcas = tepcas, zobkey = tzobkey, materM = tmaterm, materE = tmatere, gamePh = tgph
       }
     where col = moving p	-- the new coding does not have correct fromSquare in promotion
           srank = if col == White then 6 else 1
@@ -589,7 +600,8 @@ doFromToMove m !p | moveIsPromo m
           tepcas = reset50Moves $ moveAndClearEp $ epcas p `less` clearcast
           !epcl = epClrZob $ epcas p0
           !zk = zobkey p0 `xor` epcl `xor` zobcast
-          CA tzobkey tmater = chainAccum (CA zk (mater p0)) [
+          CA tzobkey tmaterm tmatere tgph
+              = chainAccum (CA zk (materM p0) (materE p0) (gamePh p0)) [
                                 accumClearSq src p0,
                                 accumSetPiece dst col pie p0,
                                 accumMoving p0
@@ -601,7 +613,7 @@ reverseMoving p = updatePos p { epcas = tepcas, zobkey = z }
     where tepcas = moveAndClearEp $ epcas p
           !epcl = epClrZob $ epcas p
           !zk = zobkey p `xor` epcl
-          CA z _ = chainAccum (CA zk (mater p)) [
+          CA z _ _ _ = chainAccum (CA zk 0 0 0) [
                        accumMoving p
                    ]
 

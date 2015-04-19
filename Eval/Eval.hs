@@ -107,7 +107,7 @@ data AnyEvalItem = forall a . EvalItem a => EvIt a
 -- and a range of values (values are kept for learning purposes as doubles,
 -- but for the evaluation itself one copy of integer parameter values is also kept)
 evalItems :: [AnyEvalItem]
-evalItems = [ EvIt Material,	-- material balance (i.e. white - black material
+evalItems = [ -- EvIt Material,	-- material balance (i.e. white - black material
               EvIt Redundance,	-- bishop pair and rook redundance
               EvIt RookPawn,	-- the rook pawns are about 15% less valuable
               EvIt KingSafe,	-- king safety
@@ -230,19 +230,13 @@ normalEval :: MyPos -> EvalState -> (Int, [Int])
 normalEval p !sti = (sc, feat)
     where feat = concatMap (itemEval gph ep p) evalItems
           ep   = esEParams sti
-          scm  = feat <!> esIWeightsM sti
-          sce  = feat <!> esIWeightsE sti
-          gph  = gamePhase p
+          scm  = (mymaterM `unsafeShiftL` shift2Cp) + (feat <!> esIWeightsM sti)
+          sce  = (mymaterE `unsafeShiftL` shift2Cp) + (feat <!> esIWeightsE sti)
+          gph  = gamePh p
           !sc = ((scm + epMovingMid ep) * gph + (sce + epMovingEnd ep) * (256 - gph))
                    `unsafeShiftR` (shift2Cp + 8)
-
-gamePhase :: MyPos -> Int
-gamePhase p = g
-    where qs = popCount $ queens p
-          rs = popCount $ rooks p
-          bs = popCount $ bishops p
-          ns = popCount $ knights p
-          !g = qs * 39 + rs * 20 + (bs + ns) * 12	-- opening: 254, end: 0
+          (mymaterM, mymaterE) | moving p == White = (         materM p,          materE p)
+                               | otherwise         = (negate $ materM p, negate $ materE p)
 
 evalSideNoPawns :: MyPos -> EvalState -> (Int, [Int])
 evalSideNoPawns p sti
@@ -319,7 +313,7 @@ mateScore f p mywin = msc
           !distk = squareDistance km ky
           !distc = f kadv
           !sc = winBonus + distc*distc - distk*distk
-          !mtr = if moving p == White then mater p else -(mater p)
+          !mtr = if moving p == White then materE p else -(materE p)
           !wsc = if mywin then sc else -sc
           !msc = mtr + wsc
 
@@ -399,6 +393,8 @@ kingSquare kingsb colorp = head $ bbToSquares $ kingsb .&. colorp
 {-# INLINE kingSquare #-}
 
 ------ Material ------
+-- This is not used anymore - PSQ + material, see normalEval
+{--
 data Material = Material
 
 instance EvalItem Material where
@@ -409,6 +405,7 @@ materDiff :: MyPos -> IWeights
 materDiff p = [md]
     where !md | moving p == White =   mater p
               | otherwise         = - mater p
+--}
 
 ------ King openness ------
 data KingOpen = KingOpen
@@ -1017,8 +1014,8 @@ pawnEndGame p
           !myking = kingSquare (kings p) (me p)
           !yoking = kingSquare (kings p) (yo p)
           (escMe, escYo, maDiff)
-              | moving p == White = (escMeWhite yoking, escYoBlack myking,   mater p)
-              | otherwise         = (escMeBlack yoking, escYoWhite myking, - mater p)
+              | moving p == White = (escMeWhite yoking, escYoBlack myking,   materE p)
+              | otherwise         = (escMeBlack yoking, escYoWhite myking, - materE p)
           mpsqs  = map escMe $ bbToSquares mfpbb	-- my pp squares & distances to promotion
           !mescds = map snd $ filter fst mpsqs		-- my escaped passed pawns
           ypsqs  = map escYo $ bbToSquares yfpbb	-- your pp squares & distances to promotion

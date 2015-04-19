@@ -41,12 +41,13 @@ data TabCont = Empty
 data MyPos = MyPos {
     black, slide, kkrq, diag, epcas :: !BBoard, -- These fields completely represents of a position
     zobkey :: !ZKey,	-- hash key
-    mater :: !Int,	-- material balance
     me, yo, occup, kings, pawns :: !BBoard,	-- further heavy used bitboards computed for efficiency
     queens, rooks, bishops, knights, passed :: !BBoard,
     myAttacs, yoAttacs, check :: BBoard,		-- my & yours attacs, check
     myPAttacs, myNAttacs, myBAttacs, myRAttacs, myQAttacs, myKAttacs :: BBoard,
     yoPAttacs, yoNAttacs, yoBAttacs, yoRAttacs, yoQAttacs, yoKAttacs :: BBoard,
+    materM, materE :: !Int,	-- material balance and PST, mid game & end game values
+    gamePh :: !Int,		-- game phase, incremental
     staticScore :: Int,
     staticFeats :: [Int]
     }
@@ -151,14 +152,13 @@ caRMQb = 0x0E00000000000000	-- black: empty fields for queenside castle
 
 emptyPos :: MyPos
 emptyPos = MyPos {
-        black = 0, slide = 0, kkrq = 0, diag = 0, epcas = 0,
-        zobkey = 0, mater = 0,
+        black = 0, slide = 0, kkrq = 0, diag = 0, epcas = 0, zobkey = 0,
         me = 0, yo = 0, occup = 0, kings = 0, pawns = 0,
         queens = 0, rooks = 0, bishops = 0, knights = 0,
         myAttacs = 0, yoAttacs = 0, check = 0,
         myPAttacs = 0, myNAttacs = 0, myBAttacs = 0, myRAttacs = 0, myQAttacs = 0, myKAttacs = 0,
         yoPAttacs = 0, yoNAttacs = 0, yoBAttacs = 0, yoRAttacs = 0, yoQAttacs = 0, yoKAttacs = 0,
-        staticScore = 0, passed = 0,
+        materM = 0, materE = 0, gamePh = 0, staticScore = 0, passed = 0,
         staticFeats = []
     }
 
