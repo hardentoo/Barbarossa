@@ -93,8 +93,8 @@ futilMargins d = futilMs - futilMv + d*futilMv
 qsBetaCut, qsDeltaCut :: Bool
 qsBetaCut  = True	-- use beta cut in QS?
 qsDeltaCut = True	-- use delta prune in QS?
-qsMaxChess :: Int
-qsMaxChess = 2		-- max number of chess for a quiet search path
+qsMaxPlys :: Int
+qsMaxPlys = 5		-- max number of plys in quiet search
 
 -- Parameters for null move pruning
 nulActivate :: Bool
@@ -574,7 +574,7 @@ insertToPvs d p ps@(q:qs)
 mustQSearch :: Int -> Int -> Search (Int, Int)
 mustQSearch !a !b = do
     nodes0 <- gets (sNodes . stats)
-    v <- pvQSearch a b 0
+    v <- pvQSearch a b qsMaxPlys
     nodes1 <- gets (sNodes . stats)
     let deltan = nodes1 - nodes0
     return (v, deltan)
@@ -1117,7 +1117,7 @@ trimax a b x
 
 -- PV Quiescent Search
 pvQSearch :: Int -> Int -> Int -> Search Int
-pvQSearch !a !b c = do				   -- to avoid endless loops
+pvQSearch !a !b !c = do				   -- to avoid endless loops
     -- qindent $ "=> " ++ show a ++ ", " ++ show b
     !stp <- lift staticVal				-- until we can recognize repetition
     viztreeScore $ "Static: " ++ show stp
@@ -1130,19 +1130,7 @@ pvQSearch !a !b c = do				   -- to avoid endless loops
               then do
                   lift $ finNode "MATE" False
                   return $! trimax a b stp
-              else if c >= qsMaxChess
-                      then do
-                          viztreeScore $ "endless check: " ++ show inEndlessCheck
-                          lift $ finNode "ENDL" False
-                          return $! trimax a b inEndlessCheck
-                      else do
-                          -- for check extensions in case of very few moves (1 or 2):
-                          -- if 1 move: search even deeper
-                          -- if 2 moves: same depth
-                          -- if 3 or more: no extension
-                          let !esc = lenmax3 $ unalt edges
-                              !nc = c + esc - 2
-                          pvQLoop b nc a edges
+              else pvQLoop b c a edges
        else if qsBetaCut && stp >= b
                then do
                    lift $ finNode "BETA" False
@@ -1151,22 +1139,22 @@ pvQSearch !a !b c = do				   -- to avoid endless loops
                       then do
                           lift $ finNode "DELT" False
                           return a
-                      else do
-                          edges <- liftM Alt $ lift genTactMoves
-                          if noMove edges
-                             then do
-                                 lift $ finNode "NOCA" False
-                                 return $! trimax a b stp
-                             else if stp > a
-                                     then pvQLoop b c stp edges
-                                     else pvQLoop b c a   edges
-    where lenmax3 = go 0
-              where go n _ | n == 3 = 3
-                    go n []         = n
-                    go n (_:as)     = go (n+1) as
+                      else if c <= 0
+                          then do
+                              lift $ finNode "QSLI" False
+                              return a
+                          else do
+                              edges <- liftM Alt $ lift genTactMoves
+                              if noMove edges
+                                 then do
+                                     lift $ finNode "NOCA" False
+                                     return $! trimax a b stp
+                                 else if stp > a
+                                         then pvQLoop b (c-1) stp edges
+                                         else pvQLoop b (c-1) a   edges
 
 pvQLoop :: Int -> Int -> Int -> Alt Move -> Search Int
-pvQLoop b c = go
+pvQLoop !b !c = go
     where go !s (Alt [])     = return s
           go !s (Alt (e:es)) = do
               (!cut, !s') <- pvQInnerLoop b c s e
@@ -1174,7 +1162,7 @@ pvQLoop b c = go
                      else go s' $ Alt es
 
 pvQInnerLoop :: Int -> Int -> Int -> Move -> Search (Bool, Int)
-pvQInnerLoop !b c !a e = do
+pvQInnerLoop !b !c !a e = do
     abrt <- timeToAbort
     if abrt
        then return (True, b)	-- it doesn't matter which score we return
