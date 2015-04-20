@@ -84,9 +84,6 @@ posNewSearch p = p { hash = newGener (hash p) }
 -- debugGen :: Bool
 -- debugGen = False
 
-loosingLast :: Bool
-loosingLast = True
-
 genMoves :: Game ([Move], [Move])
 genMoves = do
     p <- getPos
@@ -100,9 +97,7 @@ genMoves = do
                 (l2w, l2l) = genMoveCaptWL p
                 l3'= genMoveNCapt p
             l3 <- sortMovesFromHist l3'
-            return $! if loosingLast
-                         then (l1 ++ l2w, l0 ++ l3 ++ l2l)
-                         else (l1 ++ l2w ++ l2l, l0 ++ l3)
+            return (l1 ++ l2w, l2l ++ l0 ++ l3)
 
 -- Generate only tactical moves, i.e. promotions, captures & check escapes
 genTactMoves :: Game [Move]
