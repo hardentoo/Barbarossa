@@ -467,10 +467,10 @@ pvInnerRootExten b d !exd nst =  do
               ++ " mvn " ++ show (movno nst) ++ " next depth " ++ show d1
     let nega = negatePath a
         negb = negatePath b
-    if inPv || d <= minPvDepth	-- search of principal variation
+    if inPv || d1 <= minPvDepth	-- search of principal variation
        then do
            viztreeABD (pathScore negb) (pathScore nega) d1
-           let nst' = if d <= minPvDepth then nst { albe = True } else nst
+           let nst' = if d1 <= minPvDepth then nst { albe = True } else nst
            fmap pnextlev (pvSearch nst' negb nega d1)
        else do
            let aGrain = nega -: scoreGrain
@@ -631,11 +631,10 @@ pvSearch nst !a !b !d = do
                 return s	-- shouldn't we ttStore this?
               else do
                 nodes0 <- gets (sNodes . stats)
-                -- Here: when ab we should do futility pruning
-                -- futility pruning:
-                prune <- if not futilActive && ab
-                            then return False
-                            else isPruneFutil d a
+                -- Here: futility pruning also in PV
+                prune <- if futilActive
+                            then isPruneFutil d a
+                            else return False
                 -- Loop thru the moves
                 let !nsti = resetNSt a nst'
                 nstf <- pvSLoop b d prune nsti edges
@@ -883,10 +882,10 @@ pvInnerLoopExten b d !exd nst = do
            ++ " exd' = " ++ show exd' ++ " mvn " ++ show (movno nst) ++ " next depth " ++ show d1
     let nega = negatePath a
         negb = negatePath b
-    if inPv || d <= minPvDepth
+    if inPv || d1 <= minPvDepth
        then do
           viztreeABD (pathScore negb) (pathScore nega) d1
-          let nst' = if d <= minPvDepth then nst { albe = True } else nst
+          let nst' = if d1 <= minPvDepth then nst { albe = True } else nst
           fmap pnextlev (pvSearch nst' negb nega d1)
        else do
           let aGrain = nega -: scoreGrain
