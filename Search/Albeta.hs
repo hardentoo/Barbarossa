@@ -61,7 +61,7 @@ maxDepthExt = 3 -- maximum depth extension
 useNegHist  = False	-- when not cutting - negative history
 negHistMNo  = 1		-- how many moves get negative history
 useTTinPv   = False	-- retrieve from TT in PV?
-minPvDepth  = 2		-- from this depth we use alpha beta search
+minPvDepth  = 3		-- from this depth we use alpha beta search
 
 -- Parameters for late move reduction:
 lmrActive, lmrDebug :: Bool
