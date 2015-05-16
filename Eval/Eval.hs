@@ -630,17 +630,18 @@ data Center = Center
 instance EvalItem Center where
     evalItem _ _ p _ = centerDiff p
     evalItemNDL _  = [
-                      ("centerPAtts", ((70, 60), (0, 200))),
-                      ("centerNAtts", ((57, 45), (0, 200))),
-                      ("centerBAtts", ((57, 45), (0, 200))),
-                      ("centerRAtts", ((17, 30), (0, 200))),
-                      ("centerQAtts", (( 4, 60), (0, 200))),
-                      ("centerKAtts", (( 0, 70), (0, 200)))
+                      ("centerPawns", ((105, 70), (0, 200))),
+                      ("centerPAtts", ((105, 70), (0, 200))),
+                      ("centerNAtts", (( 57, 45), (0, 200))),
+                      ("centerBAtts", (( 57, 45), (0, 200))),
+                      ("centerRAtts", (( 17, 30), (0, 200))),
+                      ("centerQAtts", ((  4, 60), (0, 200))),
+                      ("centerKAtts", ((  0, 70), (0, 200)))
                      ]
 
 -- This function is already optimised
 centerDiff :: MyPos -> IWeights
-centerDiff p = [pd, nd, bd, rd, qd, kd]
+centerDiff p = [cd, pd, nd, bd, rd, qd, kd]
     where !mpa = popCount $ myPAttacs p .&. center
           !ypa = popCount $ yoPAttacs p .&. center
           !pd  = mpa - ypa
@@ -659,6 +660,10 @@ centerDiff p = [pd, nd, bd, rd, qd, kd]
           !mka = popCount $ myKAttacs p .&. center
           !yka = popCount $ yoKAttacs p .&. center
           !kd  = mka - yka
+          !cp  = pawns p .&. center
+          !mcc = popCount $ me p .&. cp
+          !ycc = popCount $ yo p .&. cp
+          !cd  = mcc - ycc
           center = 0x0000001818000000
 
 -------- Isolated pawns --------
