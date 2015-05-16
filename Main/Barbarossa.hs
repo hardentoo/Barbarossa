@@ -409,7 +409,7 @@ getTimeParams cs _ c	-- unused: lastsc
 
 -- These parameters should be optimised (i.e.: first made options)
 remTimeFracIni, remTimeFracFin, remTimeFracDev :: Double
-remTimeFracIni = 0.15	-- fraction of remaining time which we can consume at once - initial value
+remTimeFracIni = 0.05	-- fraction of remaining time which we can consume at once - initial value
 remTimeFracFin = 0.5	-- same at final (when remaining time is near zero)
 remTimeFracDev = remTimeFracFin - remTimeFracIni
 
