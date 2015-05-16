@@ -57,7 +57,7 @@ scoreGrain  = 4	-- score granularity
 depthForCM  = 7 -- from this depth inform current move
 minToStore  = 1 -- minimum remaining depth to store the position in hash
 minToRetr   = 1 -- minimum remaining depth to retrieve
-maxDepthExt = 3 -- maximum depth extension
+maxDepthExt = 2 -- maximum depth at which extension is considered
 useNegHist  = False	-- when not cutting - negative history
 negHistMNo  = 1		-- how many moves get negative history
 useTTinPv   = False	-- retrieve from TT in PV?
@@ -94,8 +94,6 @@ futDecayW = (1 `unsafeShiftL` futDecayB) - 1
 qsBetaCut, qsDeltaCut :: Bool
 qsBetaCut  = True	-- use beta cut in QS?
 qsDeltaCut = True	-- use delta prune in QS?
-qsMaxChess :: Int
-qsMaxChess = 2		-- max number of chess for a quiet search path
 
 -- Parameters for null move pruning
 nulActivate, nulDebug :: Bool
@@ -159,7 +157,6 @@ data PVState
           ronly   :: PVReadOnly,	-- read only parameters
           stats   :: SStats,	-- search statistics
           absdp   :: !Int,	-- absolute depth (root = 0)
-          usedext :: !Int,	-- used extension
           abort   :: !Bool,	-- search aborted (time)
           futme   :: !Int,	-- variable futility score - me
           forme   :: !Int,	-- variable futility forgetnes - me
@@ -284,7 +281,7 @@ tailSeq es
     | otherwise  = Seq $ tail $ unseq es
 
 pvsInit :: PVState
-pvsInit = PVState { ronly = pvro00, stats = stt0, absdp = 0, usedext = 0, abort = False,
+pvsInit = PVState { ronly = pvro00, stats = stt0, absdp = 0, abort = False,
                     futme = futIniVal, forme = futDecayW, futyo = futIniVal, foryo = futDecayW }
 nst0 :: NodeState
 nst0 = NSt { crtnt = PVNode, nxtnt = PVNode, cursc = pathFromScore "Zero" 0,
@@ -462,7 +459,7 @@ pvInnerRoot b d nst e = do
                 -- undo the move if it was legal
                 lift undoMove
                 viztreeUp nn e (pathScore s)
-                modify $ \s' -> s' { absdp = absdp old, usedext = usedext old }
+                modify $ \s' -> s' { absdp = absdp old }
                 let s' = addToPath e s
                 pindent $ "<- " ++ show e ++ " (" ++ show s' ++ ")"
                 checkFailOrPVRoot (stats old) b d e s' nst
@@ -472,13 +469,11 @@ pvInnerRoot b d nst e = do
 pvInnerRootExten :: Path -> Int -> Int -> NodeState -> Search Path
 pvInnerRootExten b d !exd nst =  do
     pindent $ "depth = " ++ show d
-    old <- get
-    exd' <- reserveExtension (usedext old) exd
     let !inPv = crtnt nst == PVNode
         !a  = cursc nst
-        !d1 = d + exd' - 1	-- this is the normal (unreduced) depth for the next search
+        !d1 = newDepthExt d exd	-- this is the normal (unreduced) depth for the next search
     pindent $ "depth " ++ show d ++ " nt " ++ show (crtnt nst)
-              ++ " exd' = " ++ show exd'
+              ++ " exd = " ++ show exd
               ++ " mvn " ++ show (movno nst) ++ " next depth " ++ show d1
     let nega = negatePath a
         negb = negatePath b
@@ -589,7 +584,7 @@ insertToPvs d p ps@(q:qs)
 mustQSearch :: Int -> Int -> Search (Int, Int)
 mustQSearch !a !b = do
     nodes0 <- gets (sNodes . stats)
-    v <- pvQSearch a b 0
+    v <- pvQSearch a b
     nodes1 <- gets (sNodes . stats)
     let deltan = nodes1 - nodes0
     return (v, deltan)
@@ -858,7 +853,7 @@ pvInnerLoop b d prune nst e = do
                            Illegal -> error "Cannot be illegal here"
                        lift undoMove	-- undo the move
                        viztreeUp nn e (pathScore s)
-                       modify $ \s' -> s' { absdp = absdp old, usedext = usedext old }
+                       modify $ \s' -> s' { absdp = absdp old }
                        let s' = addToPath e s
                        pindent $ "<- " ++ show e ++ " (" ++ show s' ++ ")"
                        checkFailOrPVLoop (stats old) b d e s' nst
@@ -915,7 +910,7 @@ pvInnerLoopZ b d prune nst e redu = do
                          Illegal -> error "Cannot be illegal here"
                        lift undoMove	-- undo the move
                        viztreeUp nn e (pathScore s)
-                       modify $ \s' -> s' { absdp = absdp old, usedext = usedext old }
+                       modify $ \s' -> s' { absdp = absdp old }
                        let s' = addToPath e s
                        pindent $ "<- " ++ show e ++ " (" ++ show s' ++ ")"
                        checkFailOrPVLoopZ (stats old) b d e s' nst
@@ -924,22 +919,18 @@ pvInnerLoopZ b d prune nst e redu = do
 resetSpc :: NodeState -> NodeState
 resetSpc nst = nst { spcno = movno nst }
 
-reserveExtension :: Int -> Int -> Search Int
-reserveExtension !uex !exd
-    | uex >= maxDepthExt || exd == 0 = return 0
-    | otherwise = do
-        modify $ \s -> s { usedext = usedext s + exd }
-        return exd
+newDepthExt :: Int -> Int -> Int
+newDepthExt !d !exd
+    | d <= maxDepthExt = d + exd - 1
+    | otherwise        = d - 1
 
 pvInnerLoopExten :: Path -> Int -> Int -> NodeState -> Search Path
 pvInnerLoopExten b d !exd nst = do
-    old <- get
-    exd' <- reserveExtension (usedext old) exd
     let !inPv = crtnt nst == PVNode
         a = cursc nst
-        !d1 = d + exd' - 1	-- this is the normal (unreduced) depth for next search
+        !d1 = newDepthExt d exd	-- this is the normal (unreduced) depth for next search
     pindent $ "depth " ++ show d ++ " nt " ++ show (crtnt nst)
-           ++ " exd' = " ++ show exd' ++ " mvn " ++ show (movno nst) ++ " next depth " ++ show d1
+           ++ " exd = " ++ show exd ++ " mvn " ++ show (movno nst) ++ " next depth " ++ show d1
     let nega = negatePath a
         negb = negatePath b
     if inPv || d <= minPvDepth
@@ -969,16 +960,14 @@ pvInnerLoopExten b d !exd nst = do
 -- For zero window
 pvInnerLoopExtenZ :: Path -> Int -> Bool -> Int -> NodeState -> Bool -> Search Path
 pvInnerLoopExtenZ b d spec !exd nst redu = do
-    old  <- get
-    exd' <- reserveExtension (usedext old) exd
     -- late move reduction
-    let !d1 = d + exd' - 1	-- this is the normal (unreduced) depth for next search
+    let !d1 = newDepthExt d exd	-- this is the normal (unreduced) depth for next search
         -- !d' = if redu && crtnt nst == AllNode
         !d' = if redu
                  then reduceLmr d1 (pnearmate b) spec exd (movno nst - spcno nst)
                  else d1
     pindent $ "depth " ++ show d ++ " nt " ++ show (crtnt nst)
-              ++ " exd' = " ++ show exd' ++ " mvn " ++ show (movno nst) ++ " next depth " ++ show d'
+              ++ " exd = " ++ show exd ++ " mvn " ++ show (movno nst) ++ " next depth " ++ show d'
     let onemB = negatePath $ b -: scoreGrain
         negb  = negatePath b
     viztreeABD (pathScore negb) (pathScore onemB) d'
@@ -1211,8 +1200,8 @@ trimax a b x
     | otherwise = x
 
 -- PV Quiescent Search
-pvQSearch :: Int -> Int -> Int -> Search Int
-pvQSearch !a !b c = do				   -- to avoid endless loops
+pvQSearch :: Int -> Int -> Search Int
+pvQSearch !a !b = do				   -- to avoid endless loops
     -- qindent $ "=> " ++ show a ++ ", " ++ show b
     !stp <- lift staticVal				-- until we can recognize repetition
     viztreeScore $ "Static: " ++ show stp
@@ -1225,19 +1214,7 @@ pvQSearch !a !b c = do				   -- to avoid endless loops
               then do
                   lift $ finNode "MATE" False
                   return $! trimax a b stp
-              else if c >= qsMaxChess
-                      then do
-                          viztreeScore $ "endless check: " ++ show inEndlessCheck
-                          lift $ finNode "ENDL" False
-                          return $! trimax a b inEndlessCheck
-                      else do
-                          -- for check extensions in case of very few moves (1 or 2):
-                          -- if 1 move: search even deeper
-                          -- if 2 moves: same depth
-                          -- if 3 or more: no extension
-                          let !esc = lenmax3 $ unalt edges
-                              !nc = c + esc - 2
-                          pvQLoop b nc a edges
+              else pvQLoop b a edges
        else if qsBetaCut && stp >= b
                then do
                    lift $ finNode "BETA" False
@@ -1253,23 +1230,19 @@ pvQSearch !a !b c = do				   -- to avoid endless loops
                                  lift $ finNode "NOCA" False
                                  return $! trimax a b stp
                              else if stp > a
-                                     then pvQLoop b c stp edges
-                                     else pvQLoop b c a   edges
-    where lenmax3 = go 0
-              where go n _ | n == 3 = 3
-                    go n []         = n
-                    go n (_:as)     = go (n+1) as
+                                     then pvQLoop b stp edges
+                                     else pvQLoop b a   edges
 
-pvQLoop :: Int -> Int -> Int -> Alt Move -> Search Int
-pvQLoop b c = go
+pvQLoop :: Int -> Int -> Alt Move -> Search Int
+pvQLoop b = go
     where go !s (Alt [])     = return s
           go !s (Alt (e:es)) = do
-              (!cut, !s') <- pvQInnerLoop b c s e
+              (!cut, !s') <- pvQInnerLoop b s e
               if cut then return s'
                      else go s' $ Alt es
 
-pvQInnerLoop :: Int -> Int -> Int -> Move -> Search (Bool, Int)
-pvQInnerLoop !b c !a e = do
+pvQInnerLoop :: Int -> Int -> Move -> Search (Bool, Int)
+pvQInnerLoop !b !a e = do
     abrt <- timeToAbort
     if abrt
        then return (True, b)	-- it doesn't matter which score we return
@@ -1287,8 +1260,8 @@ pvQInnerLoop !b c !a e = do
                                return (-sc)
                            _        -> do
                              modify $ \s -> s { absdp = absdp s + 1 }
-                             !sc <- pvQSearch (-b) (-a) c
-                             modify $ \s -> s { absdp = absdp s - 1 }	-- no usedext here
+                             !sc <- pvQSearch (-b) (-a)
+                             modify $ \s -> s { absdp = absdp s - 1 }
                              return (-sc)
                 lift undoMove
                 viztreeUp nn e sc
