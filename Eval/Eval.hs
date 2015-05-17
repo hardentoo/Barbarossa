@@ -666,20 +666,16 @@ data Izolan = Izolan
 
 instance EvalItem Izolan where
     evalItem _ _ p _ = isolDiff p
-    evalItemNDL _  = [
-                      ("isolPawns",  ((-42, -120), (-300, 0))),
-                      ("isolPassed", ((-57, -150), (-500, 0)))
-                     ]
+    evalItemNDL _  = [ ("isolPawns",  ((-42, -120), (-300, 0))) ]
 
 isolDiff :: MyPos -> IWeights
-isolDiff p = [ nd, pd ]
-    where (!myr, !myp) = isol (pawns p .&. me p) (passed p)
-          (!yor, !yop) = isol (pawns p .&. yo p) (passed p)
+isolDiff p = [ nd ]
+    where !myr = isol (pawns p .&. me p) (passed p)
+          !yor = isol (pawns p .&. yo p) (passed p)
           !nd = myr - yor
-          !pd = myp - yop
 
-isol :: BBoard -> BBoard -> (Int, Int)
-isol ps pp = (ris, pis)
+isol :: BBoard -> BBoard -> Int
+isol ps pp = ris
     where !myp = ps .&. pp
           !myr = ps `less` myp
           !myf = ((ps .&. notFileA) `unsafeShiftR` 1) .|. ((ps .&. notFileH) `unsafeShiftL` 1)
@@ -687,7 +683,6 @@ isol ps pp = (ris, pis)
           !myd = myf `unsafeShiftR` 8
           !myc = myf .|. myu .|. myd
           !ris = popCount $ myr `less` myc
-          !pis = popCount $ myp `less` myc
 
 -------- Backward pawns --------
 data Backward = Backward
@@ -926,18 +921,18 @@ data PassPawns = PassPawns
 -- 4686 games at 15+0.25 games pass3o against itself (mean)
 -- Clop forecast: 60+-25 elo
 instance EvalItem PassPawns where
-    evalItem gph ep p _ = passPawns gph ep p
-    evalItemNDL _   = [("passPawnLev", ((1, 9), (0, 20)))]
+    evalItem _ ep p _ = passPawns ep p
+    evalItemNDL _   = [("passPawnLev", ((3, 9), (0, 20)))]
  
 -- Every passed pawn will be evaluated separately
-passPawns :: Int -> EvalParams -> MyPos -> IWeights
-passPawns gph ep p = [dpp]
+passPawns :: EvalParams -> MyPos -> IWeights
+passPawns ep p = [dpp]
     where !mppbb = passed p .&. me p
           !yppbb = passed p .&. yo p
           !myc = moving p
           !yoc = other myc
-          !mypp = sum $ map (perPassedPawn gph ep p myc) $ bbToSquares mppbb
-          !yopp = sum $ map (perPassedPawn gph ep p yoc) $ bbToSquares yppbb
+          !mypp = sum $ map (perPassedPawn ep p myc) $ bbToSquares mppbb
+          !yopp = sum $ map (perPassedPawn ep p yoc) $ bbToSquares yppbb
           !dpp  = mypp - yopp
 
 -- The value of the passed pawn depends answers to this questions:
@@ -945,22 +940,22 @@ passPawns gph ep p = [dpp]
 -- - how many squares ahead are blocked by own/opponent pieces?
 -- - how many squares ahead are controlled by own/opponent pieces?
 -- - does it has a rook behind?
-perPassedPawn :: Int -> EvalParams -> MyPos -> Color -> Square -> Int
-perPassedPawn gph ep p c sq
+perPassedPawn :: EvalParams -> MyPos -> Color -> Square -> Int
+perPassedPawn ep p c sq
     | attacked && not defended
         && c /= moving p = epPassMin ep	-- but if we have more than one like that?
-    | otherwise          = perPassedPawnOk gph ep p c sq sqbb moi toi moia toia
+    | otherwise          = perPassedPawnOk ep p c sqbb moi toi moia toia moipa
     where !sqbb = 1 `unsafeShiftL` sq
-          (!moi, !toi, !moia, !toia)
-               | moving p == c = (me p, yo p, myAttacs p, yoAttacs p)
-               | otherwise     = (yo p, me p, yoAttacs p, myAttacs p)
+          (!moi, !toi, !moia, !toia, !moipa)
+               | moving p == c = (me p, yo p, myAttacs p, yoAttacs p, myPAttacs p)
+               | otherwise     = (yo p, me p, yoAttacs p, myAttacs p, yoPAttacs p)
           !defended = moia .&. sqbb /= 0
           !attacked = toia .&. sqbb /= 0
 
+{--
 perPassedPawnOk :: Int -> EvalParams -> MyPos -> Color -> Square -> BBoard -> BBoard -> BBoard -> BBoard -> BBoard -> Int
 perPassedPawnOk gph ep p c sq sqbb moi toi moia toia = val
-    where
-          (!way, !behind) | c == White = (shadowUp sqbb, shadowDown sqbb)
+    where (!way, !behind) | c == White = (shadowUp sqbb, shadowDown sqbb)
                           | otherwise  = (shadowDown sqbb, shadowUp sqbb)
           !mblo = popCount $ moi .&. way
           !yblo = popCount $ toi .&. way
@@ -991,6 +986,32 @@ perPassedPawnOk gph ep p c sq sqbb moi toi moia toia = val
                 * (128 - epPassBlockA ep * yblo)) `unsafeShiftR` 21
           !val  = (val' * (128 + epPassMyCtrl ep * myctrl) * (128 - epPassYoCtrl ep * yoctrl))
                     `unsafeShiftR` 14
+--}
+
+perPassedPawnOk :: EvalParams -> MyPos -> Color -> BBoard -> BBoard -> BBoard -> BBoard -> BBoard -> BBoard -> Int
+perPassedPawnOk ep p c sqbb moi toi moia toia moipa = val
+    where (!way, !behind) | c == White = (shadowUp sqbb, shadowDown sqbb)
+                          | otherwise  = (shadowDown sqbb, shadowUp sqbb)
+          !adv = popCount behind	-- it contain a bonus as a passed, coz it begins with 1
+          !mblo = popCount $ moi .&. way
+          !yblo = popCount $ toi .&. way
+          !rookBehind = behind .&. (rooks p .|. queens p)
+          !mebehind = rookBehind .&. moi /= 0
+                   && rookBehind .&. toi == 0
+          !yobehind = rookBehind .&. moi == 0
+                   && rookBehind .&. toi /= 0
+          !bbmyctrl = moia .&. way
+          !bbyoctrl = toia .&. way
+          !myctrl = popCount bbmyctrl
+          !yoctrl = popCount bbyoctrl
+          !pdefnd = (way .|. sqbb) .&. moipa /= 0
+          !val' = max (epPassMin ep) $
+                      adv * adv * 6 - mblo * 10 - yblo * 20 + myctrl * 15 - yoctrl * 15
+          !val'' | pdefnd    = val' + (val' `unsafeShiftR` 2)
+                 | otherwise = val'
+          !val | mebehind  = val'' + (val'' `unsafeShiftR` 2)
+               | yobehind  = val'' - (val'' `unsafeShiftR` 2)
+               | otherwise = val''
 
 -- Pawn end games are treated specially
 -- We consider escaped passed pawns in 2 situations:
