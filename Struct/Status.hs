@@ -42,10 +42,12 @@ data EvalParams
           epMaterScale :: !Int,
           epMaterBonusScale :: !Int,
           epPawnBonusScale  :: !Int,
+          -- Parameters of passed pawns
           epPassKingProx    :: !Int,
           epPassBlockO :: !Int,
           epPassBlockA :: !Int,
           epPassMin    :: !Int,
           epPassMyCtrl :: !Int,
-          epPassYoCtrl :: !Int
+          epPassYoCtrl :: !Int,
+          epPassPDefnd :: !Int
       } deriving Show

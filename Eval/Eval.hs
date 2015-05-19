@@ -45,11 +45,12 @@ instance CollectParams EvalParams where
                     epMaterBonusScale = 4,
                     epPawnBonusScale  = 4,
                     epPassKingProx    = 8,
-                    epPassBlockO = 10,
-                    epPassBlockA = 15,
+                    epPassBlockO = 12,
+                    epPassBlockA = 18,
                     epPassMin    = 29,
                     epPassMyCtrl = 9,
-                    epPassYoCtrl = 5
+                    epPassYoCtrl = 5,
+                    epPassPDefnd = 25		-- when defended by pawn(s)
                 }
     npColParm = collectEvalParams
     npSetParm = id
@@ -69,7 +70,8 @@ collectEvalParams (s, v) ep = lookApply s v ep [
         ("epPassBlockA",      setEpPassBlockA),
         ("epPassMin",         setEpPassMin),
         ("epPassMyCtrl",      setEpPassMyCtrl),
-        ("epPassYoCtrl",      setEpPassYoCtrl)
+        ("epPassYoCtrl",      setEpPassYoCtrl),
+        ("epPassPDefnd",      setEpPassPDefnd)
     ]
     where setEpMovingMid       v' ep' = ep' { epMovingMid       = round v' }
           setEpMovingEnd       v' ep' = ep' { epMovingEnd       = round v' }
@@ -85,6 +87,7 @@ collectEvalParams (s, v) ep = lookApply s v ep [
           setEpPassMin         v' ep' = ep' { epPassMin         = round v' }
           setEpPassMyCtrl      v' ep' = ep' { epPassMyCtrl      = round v' }
           setEpPassYoCtrl      v' ep' = ep' { epPassYoCtrl      = round v' }
+          setEpPassPDefnd      v' ep' = ep' { epPassPDefnd      = round v' }
 
 class EvalItem a where
     evalItem    :: Int -> EvalParams -> MyPos -> a -> IWeights
@@ -625,17 +628,19 @@ mobDiff p = [n, b, r, q]
           !q = myQ - yoQ
 
 ------ Center control ------
+-- Pawn & King params after 547 clop runs
+
 data Center = Center
 
 instance EvalItem Center where
     evalItem _ _ p _ = centerDiff p
     evalItemNDL _  = [
-                      ("centerPAtts", ((70, 60), (0, 200))),
-                      ("centerNAtts", ((57, 45), (0, 200))),
-                      ("centerBAtts", ((57, 45), (0, 200))),
-                      ("centerRAtts", ((17, 30), (0, 200))),
-                      ("centerQAtts", (( 4, 60), (0, 200))),
-                      ("centerKAtts", (( 0, 70), (0, 200)))
+                      ("centerPAtts", ((236, 104), (0, 200))),
+                      ("centerNAtts", (( 57,  45), (0, 200))),
+                      ("centerBAtts", (( 57,  45), (0, 200))),
+                      ("centerRAtts", (( 17,  30), (0, 200))),
+                      ("centerQAtts", ((  4,  60), (0, 200))),
+                      ("centerKAtts", ((  3,  90), (0, 200)))
                      ]
 
 -- This function is already optimised
@@ -921,18 +926,18 @@ data PassPawns = PassPawns
 -- 4686 games at 15+0.25 games pass3o against itself (mean)
 -- Clop forecast: 60+-25 elo
 instance EvalItem PassPawns where
-    evalItem _ ep p _ = passPawns ep p
+    evalItem gph ep p _ = passPawns gph ep p
     evalItemNDL _   = [("passPawnLev", ((3, 9), (0, 20)))]
  
 -- Every passed pawn will be evaluated separately
-passPawns :: EvalParams -> MyPos -> IWeights
-passPawns ep p = [dpp]
+passPawns :: Int -> EvalParams -> MyPos -> IWeights
+passPawns gph ep p = [dpp]
     where !mppbb = passed p .&. me p
           !yppbb = passed p .&. yo p
           !myc = moving p
           !yoc = other myc
-          !mypp = sum $ map (perPassedPawn ep p myc) $ bbToSquares mppbb
-          !yopp = sum $ map (perPassedPawn ep p yoc) $ bbToSquares yppbb
+          !mypp = sum $ map (perPassedPawn gph ep p myc) $ bbToSquares mppbb
+          !yopp = sum $ map (perPassedPawn gph ep p yoc) $ bbToSquares yppbb
           !dpp  = mypp - yopp
 
 -- The value of the passed pawn depends answers to this questions:
@@ -940,11 +945,11 @@ passPawns ep p = [dpp]
 -- - how many squares ahead are blocked by own/opponent pieces?
 -- - how many squares ahead are controlled by own/opponent pieces?
 -- - does it has a rook behind?
-perPassedPawn :: EvalParams -> MyPos -> Color -> Square -> Int
-perPassedPawn ep p c sq
+perPassedPawn :: Int -> EvalParams -> MyPos -> Color -> Square -> Int
+perPassedPawn gph ep p c sq
     | attacked && not defended
         && c /= moving p = epPassMin ep	-- but if we have more than one like that?
-    | otherwise          = perPassedPawnOk ep p c sqbb moi toi moia toia moipa
+    | otherwise          = perPassedPawnOk gph ep p c sq sqbb moi toi moia toia moipa
     where !sqbb = 1 `unsafeShiftL` sq
           (!moi, !toi, !moia, !toia, !moipa)
                | moving p == c = (me p, yo p, myAttacs p, yoAttacs p, myPAttacs p)
@@ -952,9 +957,8 @@ perPassedPawn ep p c sq
           !defended = moia .&. sqbb /= 0
           !attacked = toia .&. sqbb /= 0
 
-{--
-perPassedPawnOk :: Int -> EvalParams -> MyPos -> Color -> Square -> BBoard -> BBoard -> BBoard -> BBoard -> BBoard -> Int
-perPassedPawnOk gph ep p c sq sqbb moi toi moia toia = val
+perPassedPawnOk :: Int -> EvalParams -> MyPos -> Color -> Square -> BBoard -> BBoard -> BBoard -> BBoard -> BBoard -> BBoard -> Int
+perPassedPawnOk gph ep p c sq sqbb moi toi moia toia moipa = val
     where (!way, !behind) | c == White = (shadowUp sqbb, shadowDown sqbb)
                           | otherwise  = (shadowDown sqbb, shadowUp sqbb)
           !mblo = popCount $ moi .&. way
@@ -968,6 +972,7 @@ perPassedPawnOk gph ep p c sq sqbb moi toi moia toia = val
                     | otherwise = moia .&. way
           !bbyoctrl | yobehind  = way `less` bbmyctrl
                     | otherwise = toia .&. (way `less` bbmyctrl)
+          !pdefnd = popCount $ (way .|. sqbb) .&. moipa
           !bbfree   = way `less` (bbmyctrl .|. bbyoctrl)
           !myctrl = popCount bbmyctrl
           !yoctrl = popCount bbyoctrl
@@ -982,36 +987,38 @@ perPassedPawnOk gph ep p c sq sqbb moi toi moia toia = val
           !mdis = squareDistance sq myking
           !ydis = squareDistance sq yoking
           !kingprx = ((mdis - ydis) * epPassKingProx ep * (256-gph)) `unsafeShiftR` 8
-          !val' = (pmax * (128 - kingprx) * (128 - epPassBlockO ep * mblo)
-                * (128 - epPassBlockA ep * yblo)) `unsafeShiftR` 21
-          !val  = (val' * (128 + epPassMyCtrl ep * myctrl) * (128 - epPassYoCtrl ep * yoctrl))
-                    `unsafeShiftR` 14
---}
+          !val'  = (pmax * (128 - kingprx) * (128 + epPassPDefnd ep * pdefnd)) `unsafeShiftR` 14
+          !val'' = (val' * (128 - epPassBlockO ep * mblo) * (128 - epPassBlockA ep * yblo))
+                      `unsafeShiftR` 14
+          !val   = (val'' * (128 + epPassMyCtrl ep * myctrl) * (128 - epPassYoCtrl ep * yoctrl))
+                      `unsafeShiftR` 14
 
-perPassedPawnOk :: EvalParams -> MyPos -> Color -> BBoard -> BBoard -> BBoard -> BBoard -> BBoard -> BBoard -> Int
-perPassedPawnOk ep p c sqbb moi toi moia toia moipa = val
-    where (!way, !behind) | c == White = (shadowUp sqbb, shadowDown sqbb)
-                          | otherwise  = (shadowDown sqbb, shadowUp sqbb)
-          !adv = popCount behind	-- it contain a bonus as a passed, coz it begins with 1
-          !mblo = popCount $ moi .&. way
-          !yblo = popCount $ toi .&. way
-          !rookBehind = behind .&. (rooks p .|. queens p)
-          !mebehind = rookBehind .&. moi /= 0
-                   && rookBehind .&. toi == 0
-          !yobehind = rookBehind .&. moi == 0
-                   && rookBehind .&. toi /= 0
-          !bbmyctrl = moia .&. way
-          !bbyoctrl = toia .&. way
+{--
+perPassedPawnOk :: EvalParams -> MyPos -> Color -> Square -> BBoard -> BBoard -> BBoard -> BBoard -> BBoard -> BBoard -> Int
+perPassedPawnOk ep p c sq sqbb moi toi moia toia moipa = val
+    where (!nxt, !behind) | c == White = (sqbb `unsafeShiftL` 1, shadowDown sqbb)
+                          | otherwise  = (sqbb `unsafeShiftR` 1, shadowUp sqbb)
+          !adv = popCount behind	-- it contains a bonus as a passed, coz it begins with 1
+          !mblo = popCount $ moi .&. nxt
+          !yblo = popCount $ toi .&. nxt
+          !ratt = rAttacs (occup p) sq
+          !rookBehind = behind .&. ratt .&. (rooks p .|. queens p)
+          !bbmyctrl = moia .&. nxt
+          !bbyoctrl = toia .&. nxt
           !myctrl = popCount bbmyctrl
           !yoctrl = popCount bbyoctrl
-          !pdefnd = (way .|. sqbb) .&. moipa /= 0
+          !pdefnd = (nxt .|. sqbb) .&. moipa /= 0
           !val' = max (epPassMin ep) $
-                      adv * adv * 6 - mblo * 10 - yblo * 20 + myctrl * 15 - yoctrl * 15
-          !val'' | pdefnd    = val' + (val' `unsafeShiftR` 2)
+                      passAdvance `unsafeAt` adv - mblo * epPassBlockO ep - yblo * epPassBlockA ep
+                    + myctrl * epPassMyCtrl ep - yoctrl * epPassYoCtrl ep
+          !val'' | pdefnd    = val' + (val' `unsafeShiftR` 1)
                  | otherwise = val'
-          !val | mebehind  = val'' + (val'' `unsafeShiftR` 2)
-               | yobehind  = val'' - (val'' `unsafeShiftR` 2)
-               | otherwise = val''
+          !val | rookBehind .&. moi /= 0 = val'' + (val'' `unsafeShiftR` 2)
+               | rookBehind .&. toi /= 0 = val'' - (val'' `unsafeShiftR` 2)
+               | otherwise               = val''
+          passAdvance :: UArray Int Int
+          passAdvance = listArray (0, 6) [ 0, 30, 50, 80, 130, 210, 340 ]
+--}
 
 -- Pawn end games are treated specially
 -- We consider escaped passed pawns in 2 situations:
