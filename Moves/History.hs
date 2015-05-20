@@ -32,7 +32,7 @@ histp !d = w `unsafeShiftR` d
 -- Negative history:
 histn :: Int -> Int
 histn !d = w `unsafeShiftR` d
-    where w = 0x40000	-- negative: less (2 bit)
+    where w = 0x10000	-- negative: less (4 bit)
 
 {-# INLINE toHist #-}
 toHist :: History -> Bool -> Move -> Int -> IO ()

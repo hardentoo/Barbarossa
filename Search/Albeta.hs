@@ -51,15 +51,16 @@ useAspirWin = False
 -- a33 = 100, 20, 4	-> elo   0 +- 58
 
 -- Some fix search parameter
-scoreGrain, depthForCM, minToStore, minToRetr, maxDepthExt, negHistMNo, minPvDepth :: Int
+-- scoreGrain, depthForCM, minToStore, minToRetr, maxDepthExt, negHistMNo, minPvDepth :: Int
+scoreGrain, depthForCM, minToStore, minToRetr, maxDepthExt, minPvDepth :: Int
 useNegHist, useTTinPv :: Bool
 scoreGrain  = 4	-- score granularity
 depthForCM  = 7 -- from this depth inform current move
 minToStore  = 1 -- minimum remaining depth to store the position in hash
 minToRetr   = 1 -- minimum remaining depth to retrieve
 maxDepthExt = 3 -- maximum depth extension
-useNegHist  = False	-- when not cutting - negative history
-negHistMNo  = 1		-- how many moves get negative history
+useNegHist  = True	-- when not cutting - negative history
+-- negHistMNo  = 1		-- how many moves get negative history
 useTTinPv   = False	-- retrieve from TT in PV?
 minPvDepth  = 2		-- from this depth we use alpha beta search
 
@@ -532,7 +533,8 @@ checkFailOrPVRoot xstats b d e s !nst = do
        else if s <= a
            then do -- failed low
                -- when in a cut node and the move dissapointed - negative history
-               when (useNegHist && mn <= negHistMNo) $ lift $ betaCut False (ply sst) e
+               -- when (useNegHist && mn <= negHistMNo) $ lift $ betaCut False (ply sst) e
+               when useNegHist $ lift $ betaCut False (ply sst) e
                -- if crtnt nst == PVNode
                --    then return (True, nst { cursc = s })	-- i.e we failed low in aspiration with 1st move
                --    else do
@@ -1006,7 +1008,8 @@ checkFailOrPVLoop xstats b d e s !nst = do
     if s <= cursc nst
        then do
             -- when in a cut node and the move dissapointed - negative history
-            when (useNegHist && mn <= negHistMNo) $ lift $ betaCut False (ply sst) e
+            -- when (useNegHist && mn <= negHistMNo) $ lift $ betaCut False (ply sst) e
+            when useNegHist $ lift $ betaCut False (ply sst) e
             !kill1 <- newKiller d s nst
             continue nst { movno = mn+1, killer = kill1, pvcont = emptySeq }
        else do
@@ -1044,7 +1047,8 @@ checkFailOrPVLoopZ xstats b d e s !nst = do
     if s < b	-- failed low
        then do
             -- when in a cut node and the move dissapointed - negative history
-            when (useNegHist && mn <= negHistMNo) $ lift $ betaCut False (ply sst) e
+            -- when (useNegHist && mn <= negHistMNo) $ lift $ betaCut False (ply sst) e
+            when useNegHist $ lift $ betaCut False (ply sst) e
             !kill1 <- newKiller d s nst
             continue nst { movno = mn+1, killer = kill1, pvcont = emptySeq }
        else do	-- here is s >= b: failed high
