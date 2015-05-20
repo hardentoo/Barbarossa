@@ -281,6 +281,7 @@ dumpTT tt fname = withFile fname WriteMode $ \h -> do
 --}
 
 ----------- Test in IO -------------
+{--
 testIt :: IO Cache
 testIt = do
     tt <- newCache 32
@@ -294,6 +295,7 @@ testIt = do
     mr <- readCache ptr
     putStrLn $ show mr
     return tt
+--}
 
 ----------- QuickCheck -------------
 newtype Quint = Q (Int, Int, Int, Move, Int) deriving Show

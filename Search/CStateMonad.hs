@@ -60,6 +60,7 @@ runCState :: Monad m => CState s m a -> s -> m (a, s)
 runCState c s = runSTPlus c s $ \a s0 -> return (a, s0)
 {-# INLINE runCState #-}
 
+execCState :: Monad m => CState r m a -> r -> m r
 execCState ms s = liftM snd $ runCState ms s
 {-# INLINE execCState #-}
 

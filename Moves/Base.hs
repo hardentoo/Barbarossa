@@ -403,15 +403,15 @@ ttStore !deep !tp !sc !bestm !nds = if not useHash then return () else do
 
 -- History heuristic table update when beta cut
 betaCut :: Bool -> Int -> Move -> Game ()
-betaCut good absdp m
+betaCut good ply m
     | moveIsCastle m = do
         s <- get
-        liftIO $ toHist (hist s) good m absdp
+        liftIO $ toHist (hist s) good m ply
     | moveIsNormal m = do
         s <- get
         t <- getPos
         case tabla t (toSquare m) of
-            Empty -> liftIO $ toHist (hist s) good m absdp
+            Empty -> liftIO $ toHist (hist s) good m ply
             _     -> return ()
     | otherwise = return ()
 
