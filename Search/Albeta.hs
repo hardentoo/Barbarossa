@@ -811,8 +811,8 @@ nullMoveFailsHigh !nst b d lastnull
 
 -- This is now more than reduction 3 for depth over 9
 nmDArr1, nmDArr2 :: UArray Int Int
-nmDArr1 = listArray (0, 20) [ 0, 0, 0, 0, 0, 1, 2, 3, 4, 4, 5, 5, 5, 6, 6, 6, 6, 7, 7, 7 ]
-nmDArr2 = listArray (0, 20) [ 0, 0, 0, 0, 0, 0, 1, 2, 3, 4, 4, 5, 5, 5, 6, 6, 6, 6, 7, 7 ]
+nmDArr1 = listArray (0, 20) [ 0, 0, 0, 1, 1, 2, 3, 4, 5, 5, 6, 6, 7, 7, 7, 8, 8, 8, 8, 8 ]
+nmDArr2 = listArray (0, 20) [ 0, 0, 0, 0, 1, 1, 2, 3, 4, 5, 5, 6, 6, 7, 7, 7, 8, 8, 8, 8 ]
 
 pvSLoop :: Path -> Int -> Bool -> NodeState -> Alt Move -> Search NodeState
 pvSLoop b d p = go
