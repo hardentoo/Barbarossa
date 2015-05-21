@@ -422,6 +422,16 @@ legalResult :: DoResult -> Bool
 legalResult Illegal = False
 legalResult _       = True
 
+-- This is a kind of monadic fold optimized for (beta) cut
+{-# INLINE pvLoop #-}
+pvLoop :: Monad m => (s -> e -> m (Bool, s)) -> s -> Alt e -> m s
+pvLoop f = go
+    where go s (Alt [])     = return s
+          go s (Alt (e:es)) = do
+              (!ct, s') <- f s e
+              if ct then return s'
+                    else go s' $ Alt es
+
 -- Small helper functions:
 {-# INLINE cut #-}
 cut :: a -> Search (Bool, a)
@@ -604,6 +614,7 @@ pvSearch !nst !a !b !d = do
     pindent $ "=> " ++ show a ++ ", " ++ show b
     let !inPv = crtnt nst == PVNode
         ab    = albe nst
+        off   = not inPv
     -- Here we are always in PV if enough depth:
     when (not $ inPv || ab) $ lift $ absurd $ "pvSearch: not inPv, not ab, nst = " ++ show nst
     -- Check first for a TT entry of the position to search
@@ -616,9 +627,10 @@ pvSearch !nst !a !b !d = do
     --    Idea: return only if better than beta, else search for exact score
     -- tp == 0 => score <= hsc, so if hsc <= asco then we fail low and
     --    can terminate the search
-    if (useTTinPv || (not inPv && ab)) && hdeep >= d && (
+    if (useTTinPv || off) && hdeep >= d && (
             tp == 2				-- exact score: always good
-         || tp == 1 && hsc >= pathScore b	-- we will fail high
+         || tp == 1 && hsc >= pathScore b	-- we will fail high: HERE: when off, maybe >= a is ok:
+      -- || tp == 1 && (off && hsc >= pathScore a || hsc >= pathScore b)
          || tp == 0 && hsc <= pathScore a	-- we will fail low
        )
        then do
@@ -1111,16 +1123,6 @@ reduceLmr !d nearmatea !spec !exd !w
           lmrMvs3  = 16	-- reduced by max 2
           lmrMvs4  = 32	-- reduced by max 3
 
--- This is a kind of monadic fold optimized for (beta) cut
-{-# INLINE pvLoop #-}
-pvLoop :: Monad m => (s -> e -> m (Bool, s)) -> s -> Alt e -> m s
-pvLoop f = go
-    where go s (Alt [])     = return s
-          go s (Alt (e:es)) = do
-              (!ct, s') <- f s e
-              if ct then return s'
-                    else go s' $ Alt es
-
 isPruneFutil :: Int -> Path -> Search Bool
 isPruneFutil d a
     -- | d <= 0 || d > maxFutilDepth || nearmate (pathScore a) = return False
@@ -1181,7 +1183,7 @@ pvQSearch !a !b !c = do				   -- to avoid endless loops
     !tact <- lift tacticalPos
     if tact
        then do
-           (es1, es2) <- lift genMoves
+           (es1, es2) <- lift genMoves	-- will this sort? Is this good?
            let edges = Alt $ es1 ++ es2
            if noMove edges
               then do
@@ -1199,7 +1201,7 @@ pvQSearch !a !b !c = do				   -- to avoid endless loops
                           -- if 3 or more: no extension
                           let !esc = lenmax3 $ unalt edges
                               !nc = c + esc - 2
-                          pvQLoop b nc True a edges	-- if no legal move: mated
+                          pvQLoop b nc (-mateScore) edges	-- if no legal move: mated
        else if qsBetaCut && stp >= b
                then do
                    lift $ finNode "BETA" False
@@ -1214,9 +1216,9 @@ pvQSearch !a !b !c = do				   -- to avoid endless loops
                              then do
                                  lift $ finNode "NOCA" False
                                  return $! trimax a b stp
-                             else if stp > a	-- if no legal move: don't know
-                                     then pvQLoop b c False stp edges
-                                     else pvQLoop b c False a   edges
+                             else if stp > a
+                                     then pvQLoop b c stp edges
+                                     else pvQLoop b c a   edges
     where lenmax3 = go 0
               where go n _ | n == 3 = 3
                     go n []         = n
@@ -1226,19 +1228,19 @@ pvQSearch !a !b !c = do				   -- to avoid endless loops
 -- This would discover stale mates in QS, but probably the effort is too high
 -- Unless the (a, b) interval is far enough from 0 - then maybe it is a good idea - Test it!
 {-# INLINE pvQLoop #-}
-pvQLoop :: Int -> Int -> Bool -> Int -> Alt Move -> Search Int
-pvQLoop b c mt = go 0
-    where go 0 _ (Alt []) | mt = return (-mateScore)	-- no move found, default score: return it
-          go _ s (Alt [])      = return s	-- moves found or no deafult score: return current score
-          go n s (Alt (e:es)) = do
-              (ct, !(IPair n' s')) <- pvQInnerLoop b c n s e
-              if ct then return s'	-- cut can come only when there is a move (or time abort)
-                    else go n' s' $ Alt es
+pvQLoop :: Int -> Int -> Int -> Alt Move -> Search Int
+pvQLoop b c = go
+    where go !s (Alt [])     = return s
+          go !s (Alt (e:es)) = do
+              (ct, !s') <- pvQInnerLoop b c s e
+              if ct then return s'
+                    else go s' $ Alt es
 
-data IPair = IPair !Int Int
-
-pvQInnerLoop :: Int -> Int -> Int -> Int -> Move -> Search (Bool, IPair)
-pvQInnerLoop !b !c !n !a e = timeToAbort (IPair n b) $ do
+-- If we were in check and got no legal move, then we are mated (else continue a)
+-- If we get a legal move the score should be greater than a, so we take at least
+-- once the path: then continue sc (or we get the cut b)
+pvQInnerLoop :: Int -> Int -> Int -> Move -> Search (Bool, Int)
+pvQInnerLoop !b !c !a e = timeToAbort a $ do
     -- qindent $ "-> " ++ show e
     r <- lift $ doMove e True
     if legalResult r
@@ -1257,13 +1259,12 @@ pvQInnerLoop !b !c !n !a e = timeToAbort (IPair n b) $ do
            lift undoMove
            viztreeUp nn e sc
            -- qindent $ "<- " ++ show e ++ " (" ++ show s ++ ")"
-           let !n1 = n + 1
            if sc >= b
-              then cut (IPair n1 b)
+              then cut b
               else if sc > a
-                      then continue (IPair n1 sc)
-                      else continue (IPair n1  a)
-       else continue (IPair n a)
+                      then continue sc
+                      else continue a
+       else continue a
 
 {-# INLINE bestMoveFromIID #-}
 bestMoveFromIID :: NodeState -> Path -> Path -> Int -> Search [Move]
