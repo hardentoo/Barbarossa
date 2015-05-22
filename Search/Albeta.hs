@@ -52,7 +52,8 @@ useAspirWin = False
 
 -- Some fix search parameter
 scoreGrain, depthForCM, minToStore, minToRetr, maxDepthExt, negHistMNo, minPvDepth :: Int
-useNegHist, useTTinPv :: Bool
+useNegHist :: Bool
+-- useNegHist, useTTinPv :: Bool
 scoreGrain  = 4	-- score granularity
 depthForCM  = 7 -- from this depth inform current move
 minToStore  = 1 -- minimum remaining depth to store the position in hash
@@ -60,7 +61,7 @@ minToRetr   = 1 -- minimum remaining depth to retrieve
 maxDepthExt = 3 -- maximum depth extension
 useNegHist  = False	-- when not cutting - negative history
 negHistMNo  = 1		-- how many moves get negative history
-useTTinPv   = False	-- retrieve from TT in PV?
+-- useTTinPv   = False	-- retrieve from TT in PV?
 minPvDepth  = 2		-- from this depth we use alpha beta search
 
 -- Parameters for late move reduction:
@@ -94,8 +95,6 @@ futDecayW = (1 `unsafeShiftL` futDecayB) - 1
 qsBetaCut, qsDeltaCut :: Bool
 qsBetaCut  = True	-- use beta cut in QS?
 qsDeltaCut = True	-- use delta prune in QS?
-qsMaxChess :: Int
-qsMaxChess = 2		-- max number of chess for a quiet search path
 
 -- Parameters for null move pruning
 nulActivate, nulDebug :: Bool
@@ -126,9 +125,8 @@ iidNewDepth = subtract 1
 -- iidNewDepth = `shiftR` 1	-- i.e. div 2
 
 -- Parameter for quiescenst search
-inEndlessCheck, qsDelta :: Int
-inEndlessCheck = -scoreGrain	-- there is a risk to be left in check
-qsDelta     = 1100
+qsDelta :: Int
+qsDelta = 1100
 
 type Search a = CState PVState Game a
 
@@ -594,7 +592,7 @@ insertToPvs d p ps@(q:qs)
 mustQSearch :: Int -> Int -> Search (Int, Int)
 mustQSearch !a !b = do
     nodes0 <- gets (sNodes . stats)
-    v <- pvQSearch a b 0
+    v <- pvQSearch a b
     nodes1 <- gets (sNodes . stats)
     let deltan = nodes1 - nodes0
     return (v, deltan)
@@ -614,11 +612,12 @@ pvSearch !nst !a !b !d = do
     pindent $ "=> " ++ show a ++ ", " ++ show b
     let !inPv = crtnt nst == PVNode
         ab    = albe nst
-        off   = not inPv
-    -- Here we are always in PV if enough depth:
+        -- off   = not inPv
     when (not $ inPv || ab) $ lift $ absurd $ "pvSearch: not inPv, not ab, nst = " ++ show nst
+    -- Here we have: inPv || ab
     -- Check first for a TT entry of the position to search
-    (hdeep, tp, hsc, e', nodes')
+    -- (hdeep, tp, hsc, e', nodes')
+    (hdeep, tp, _, e', _)
         <- if d >= minToRetr
               then reTrieve >> lift ttRead
               else return (-1, 0, 0, undefined, 0)
@@ -627,19 +626,20 @@ pvSearch !nst !a !b !d = do
     --    Idea: return only if better than beta, else search for exact score
     -- tp == 0 => score <= hsc, so if hsc <= asco then we fail low and
     --    can terminate the search
-    if (useTTinPv || off) && hdeep >= d && (
-            tp == 2				-- exact score: always good
-         || tp == 1 && hsc >= pathScore b	-- we will fail high: HERE: when off, maybe >= a is ok:
-      -- || tp == 1 && (off && hsc >= pathScore a || hsc >= pathScore b)
-         || tp == 0 && hsc <= pathScore a	-- we will fail low
-       )
-       then do
-           let ttpath = Path { pathScore = hsc, pathDepth = hdeep,
-                               pathMoves = Seq [e'], pathOrig = "TT" }
-           reSucc nodes' >> return ttpath
-       else do
+--    if (useTTinPv || off) && hdeep >= d && (
+--            tp == 2				-- exact score: always good
+--         || tp == 1 && hsc >= pathScore b	-- we will fail high: HERE: when off, maybe >= a is ok:
+--      -- || tp == 1 && (off && hsc >= pathScore a || hsc >= pathScore b)
+--         || tp == 0 && hsc <= pathScore a	-- we will fail low
+--       )
+--       then do
+--           let ttpath = Path { pathScore = hsc, pathDepth = hdeep,
+--                               pathMoves = Seq [e'], pathOrig = "TT" }
+--           reSucc nodes' >> return ttpath
+--       else do
            -- Here: when ab we should do null move search
            -- Use the found TT move as best move
+    do
            let nst' = if hdeep > 0 && (tp /= 0 || nullSeq (pvcont nst))
                          then nst { pvcont = Seq [e'] }
                          else nst
@@ -654,7 +654,7 @@ pvSearch !nst !a !b !d = do
               else do
                 nodes0 <- gets (sNodes . stats)
                 -- Futility pruning:
-                prune <- isPruneFutil d a
+                prune <- if inPv then return False else isPruneFutil d a
                 -- Loop thru the moves
                 let !nsti = resetNSt a NoKiller nst'
                 nstf <- pvSLoop b d prune nsti edges
@@ -1175,8 +1175,8 @@ trimax a b x
     | otherwise = x
 
 -- PV Quiescent Search
-pvQSearch :: Int -> Int -> Int -> Search Int
-pvQSearch !a !b !c = do				   -- to avoid endless loops
+pvQSearch :: Int -> Int -> Search Int
+pvQSearch !a !b = do
     -- qindent $ "=> " ++ show a ++ ", " ++ show b
     !stp <- lift staticVal				-- until we can recognize repetition
     viztreeScore $ "Static: " ++ show stp
@@ -1188,20 +1188,8 @@ pvQSearch !a !b !c = do				   -- to avoid endless loops
            if noMove edges
               then do
                   lift $ finNode "MATE" False
-                  return $! trimax a b stp
-              else if c >= qsMaxChess
-                      then do
-                          viztreeScore $ "endless check: " ++ show inEndlessCheck
-                          lift $ finNode "ENDL" False
-                          return $! trimax a b inEndlessCheck
-                      else do
-                          -- for check extensions in case of very few moves (1 or 2):
-                          -- if 1 move: search even deeper
-                          -- if 2 moves: same depth
-                          -- if 3 or more: no extension
-                          let !esc = lenmax3 $ unalt edges
-                              !nc = c + esc - 2
-                          pvQLoop b nc (-mateScore) edges	-- if no legal move: mated
+                  return $! trimax a b (-mateScore)
+              else pvQLoop a b (-mateScore) edges	-- if no legal move: mated
        else if qsBetaCut && stp >= b
                then do
                    lift $ finNode "BETA" False
@@ -1217,22 +1205,18 @@ pvQSearch !a !b !c = do				   -- to avoid endless loops
                                  lift $ finNode "NOCA" False
                                  return $! trimax a b stp
                              else if stp > a
-                                     then pvQLoop b c stp edges
-                                     else pvQLoop b c a   edges
-    where lenmax3 = go 0
-              where go n _ | n == 3 = 3
-                    go n []         = n
-                    go n (_:as)     = go (n+1) as
+                                     then pvQLoop stp b stp edges
+                                     else pvQLoop a   b a   edges
 
 -- Should we run a full move generation when no default score and no move found?
 -- This would discover stale mates in QS, but probably the effort is too high
 -- Unless the (a, b) interval is far enough from 0 - then maybe it is a good idea - Test it!
 {-# INLINE pvQLoop #-}
 pvQLoop :: Int -> Int -> Int -> Alt Move -> Search Int
-pvQLoop b c = go
+pvQLoop a b = go
     where go !s (Alt [])     = return s
           go !s (Alt (e:es)) = do
-              (ct, !s') <- pvQInnerLoop b c s e
+              (ct, !s') <- pvQInnerLoop a b s e
               if ct then return s'
                     else go s' $ Alt es
 
@@ -1240,7 +1224,7 @@ pvQLoop b c = go
 -- If we get a legal move the score should be greater than a, so we take at least
 -- once the path: then continue sc (or we get the cut b)
 pvQInnerLoop :: Int -> Int -> Int -> Move -> Search (Bool, Int)
-pvQInnerLoop !b !c !a e = timeToAbort a $ do
+pvQInnerLoop !a !b !c e = timeToAbort a $ do
     -- qindent $ "-> " ++ show e
     r <- lift $ doMove e True
     if legalResult r
@@ -1253,7 +1237,7 @@ pvQInnerLoop !b !c !a e = timeToAbort a $ do
                           return (-sc)
                       _        -> do
                           modify $ \s -> s { ply = ply s + 1 }
-                          !sc <- pvQSearch (-b) (-a) c
+                          !sc <- pvQSearch (-b) (-a)
                           modify $ \s -> s { ply = ply s - 1 }	-- no usedext here
                           return (-sc)
            lift undoMove
@@ -1264,7 +1248,7 @@ pvQInnerLoop !b !c !a e = timeToAbort a $ do
               else if sc > a
                       then continue sc
                       else continue a
-       else continue a
+       else continue c
 
 {-# INLINE bestMoveFromIID #-}
 bestMoveFromIID :: NodeState -> Path -> Path -> Int -> Search [Move]
