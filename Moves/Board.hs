@@ -7,7 +7,7 @@ module Moves.Board (
     genMoveCast, genMoveNCapt, genMoveTransf, genMoveFCheck, genMoveCaptWL,
     genMoveNCaptToCheck,
     updatePos, checkOk, moveChecks,
-    legalMove, alternateMoves,
+    legalMove, seePositive,
     doFromToMove, reverseMoving
     ) where
 
@@ -421,16 +421,6 @@ clearingCast sdcas cas = (cascl, zobcl)
           bkbb = 0x1000000000000000	-- black king
           bqrb = 0x0100000000000000	-- black queen rook
           bkrb = 0x8000000000000000	-- black king rook
-
--- Just for a dumb debug: a quick check if two consecutive moves
--- can be part of a move sequence
-alternateMoves :: MyPos -> Move -> Move -> Bool
-alternateMoves p m1 m2
-    | Busy c1 _ <- tabla p src1,
-      Busy c2 _ <- tabla p src2 = c1 /= c2
-    | otherwise = True	-- means: we cannot say...
-    where src1 = fromSquare m1
-          src2 = fromSquare m2
 
 -- This is used to filter the illegal moves coming from killers or hash table
 -- but we must treat special moves (en-passant, castle and promotion) differently,
@@ -851,9 +841,6 @@ perCaptFieldWL pos mypc advdefence sq mvlst
                     in (prp, rea)
               | otherwise = (0, myattacs)
 
-approximateEasyCapts :: Bool
-approximateEasyCapts = True	-- when capturing a better piece: no SEE, it is always winning
-
 perCaptWL :: MyPos -> Attacks -> Bool -> Piece -> Int -> Square -> Square
           -> ([LMove], [LMove]) -> ([LMove], [LMove])
 perCaptWL !pos !attacks promo vict !gain0 !sq !sqfa (wsqs, lsqs)
@@ -861,7 +848,7 @@ perCaptWL !pos !attacks promo vict !gain0 !sq !sqfa (wsqs, lsqs)
     | approx || adv <= gain0 = (ss:wsqs, lsqs)
     | otherwise = (wsqs, ss:lsqs)
     where ss = moveToLMove attc vict $ moveAddPiece attc $ moveFromTo sqfa sq
-          approx = approximateEasyCapts && gain0 >= v0
+          approx = gain0 >= v0
           Busy _ attc = tabla pos sqfa
           v0  = value attc
           adv = seeMoveValue pos attacks sqfa sq v0
@@ -874,3 +861,14 @@ addHanging pos vict to from (wsqs, lsqs)
 
 addHangingP :: Piece -> Square -> Square -> ([LMove], [LMove]) -> ([LMove], [LMove])
 addHangingP vict to from (wsqs, lsqs) = ((moveToLMove Pawn vict $ makePromo Queen from to) : wsqs, lsqs)
+
+-- This function can be used to chck that one move (from / to) has a positive SEE
+seePositive :: MyPos -> Square -> Square -> Bool
+seePositive !pos !sqf !sqt = approx || adv <= gain0
+    where adv = seeMoveValue pos attacks sqf sqt v0
+          attacks = theAttacs pos sqt
+          Busy _ attc = tabla pos sqf
+          !v0    = value attc
+          !gain0 | Busy _ pcto <- tabla pos sqt = value pcto
+                 | otherwise                    = 0
+          approx = gain0 >= v0

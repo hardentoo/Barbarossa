@@ -9,7 +9,7 @@ module Moves.Base (
     posToState, getPos, posNewSearch,
     doRealMove, doMove, undoMove, genMoves, genTactMoves, canPruneMove,
     useHash,
-    staticVal, materVal, tacticalPos, isMoveLegal, isKillCand, isTKillCand, okInSequence,
+    staticVal, materVal, tacticalPos, isMoveLegal, isKillCand, isTKillCand,
     betaCut, doNullMove, ttRead, ttStore, curNodes, chooseMove, isTimeout, informCtx,
     mateScore, scoreDiff,
     finNode,
@@ -233,11 +233,13 @@ doMove m qs = do
                        p = p' { staticScore = sts, staticFeats = feats }
                    put s { stack = p : stack s }
                    remis <- if qs then return False else checkRemisRules p'
-                   if remis
-                      then return $ Final 0
-                      else do
-                          let dext = if inCheck p then 1 else 0
-                          return $! Exten dext $ moveIsCaptPromo pc m
+                   return $! if remis
+                                then Final 0
+                                else if inCheck p
+                                        then if seePositive pc (fromSquare m) (toSquare m)
+                                                then Exten 1 $ moveIsCaptPromo pc m
+                                                else Exten 0 $ moveIsCaptPromo pc m
+                                        else Exten 0 $ moveIsCaptPromo pc m
 
 doNullMove :: Game ()
 doNullMove = do
@@ -324,11 +326,6 @@ isTKillCand :: Move -> Game Bool
 isTKillCand mm = do
     t <- getPos
     return $! not $ moveIsCapture t mm
-
-okInSequence :: Move -> Move -> Game Bool
-okInSequence m1 m2 = do
-    t <- getPos
-    return $! alternateMoves t m1 m2
 
 -- Static evaluation function
 -- This does not detect a mate or stale mate, it only returns the calculated
