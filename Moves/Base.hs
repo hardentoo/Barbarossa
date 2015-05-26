@@ -237,8 +237,8 @@ doMove m qs = do
                                 then Final 0
                                 else if inCheck p
                                         then if seePositive pc (fromSquare m) (toSquare m)
-                                                then Exten 1 $ moveIsCaptPromo pc m
-                                                else Exten 0 $ moveIsCaptPromo pc m
+                                                then Exten 0 $ moveIsCaptPromo pc m
+                                                else Exten 1 $ moveIsCaptPromo pc m
                                         else Exten 0 $ moveIsCaptPromo pc m
 
 doNullMove :: Game ()
