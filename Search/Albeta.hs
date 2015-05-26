@@ -52,8 +52,7 @@ useAspirWin = False
 
 -- Some fix search parameter
 scoreGrain, depthForCM, minToStore, minToRetr, maxDepthExt, negHistMNo, minPvDepth :: Int
-useNegHist :: Bool
--- useNegHist, useTTinPv :: Bool
+useNegHist, useTTinPv :: Bool
 scoreGrain  = 4	-- score granularity
 depthForCM  = 7 -- from this depth inform current move
 minToStore  = 1 -- minimum remaining depth to store the position in hash
@@ -61,7 +60,7 @@ minToRetr   = 1 -- minimum remaining depth to retrieve
 maxDepthExt = 3 -- maximum depth extension
 useNegHist  = False	-- when not cutting - negative history
 negHistMNo  = 1		-- how many moves get negative history
--- useTTinPv   = False	-- retrieve from TT in PV?
+useTTinPv   = False	-- retrieve from TT in PV?
 minPvDepth  = 2		-- from this depth we use alpha beta search
 
 -- Parameters for late move reduction:
@@ -611,13 +610,11 @@ pvSearch !_ !a !b !d | d <= 0 = do
 pvSearch !nst !a !b !d = do
     pindent $ "=> " ++ show a ++ ", " ++ show b
     let !inPv = crtnt nst == PVNode
-        ab    = albe nst
-        -- off   = not inPv
+        ab    = albe nst && not inPv
     when (not $ inPv || ab) $ lift $ absurd $ "pvSearch: not inPv, not ab, nst = " ++ show nst
     -- Here we have: inPv || ab
     -- Check first for a TT entry of the position to search
-    -- (hdeep, tp, hsc, e', nodes')
-    (hdeep, tp, _, e', _)
+    (hdeep, tp, hsc, e', nodes')
         <- if d >= minToRetr
               then reTrieve >> lift ttRead
               else return (-1, 0, 0, undefined, 0)
@@ -626,20 +623,19 @@ pvSearch !nst !a !b !d = do
     --    Idea: return only if better than beta, else search for exact score
     -- tp == 0 => score <= hsc, so if hsc <= asco then we fail low and
     --    can terminate the search
---    if (useTTinPv || off) && hdeep >= d && (
---            tp == 2				-- exact score: always good
---         || tp == 1 && hsc >= pathScore b	-- we will fail high: HERE: when off, maybe >= a is ok:
---      -- || tp == 1 && (off && hsc >= pathScore a || hsc >= pathScore b)
---         || tp == 0 && hsc <= pathScore a	-- we will fail low
---       )
---       then do
---           let ttpath = Path { pathScore = hsc, pathDepth = hdeep,
---                               pathMoves = Seq [e'], pathOrig = "TT" }
---           reSucc nodes' >> return ttpath
---       else do
+    if (useTTinPv || ab) && hdeep >= d && (
+            tp == 2				-- exact score: always good
+         || tp == 1 && hsc >= pathScore b	-- we will fail high: HERE: when ab, maybe >= a is ok:
+      -- || tp == 1 && (ab && hsc >= pathScore a || hsc >= pathScore b)
+         || tp == 0 && hsc <= pathScore a	-- we will fail low
+       )
+       then do
+           let ttpath = Path { pathScore = hsc, pathDepth = hdeep,
+                               pathMoves = Seq [e'], pathOrig = "TT" }
+           reSucc nodes' >> return ttpath
+       else do
            -- Here: when ab we should do null move search
            -- Use the found TT move as best move
-    do
            let nst' = if hdeep > 0 && (tp /= 0 || nullSeq (pvcont nst))
                          then nst { pvcont = Seq [e'] }
                          else nst
@@ -654,7 +650,7 @@ pvSearch !nst !a !b !d = do
               else do
                 nodes0 <- gets (sNodes . stats)
                 -- Futility pruning:
-                prune <- if inPv then return False else isPruneFutil d a
+                prune <- isPruneFutil d a
                 -- Loop thru the moves
                 let !nsti = resetNSt a NoKiller nst'
                 nstf <- pvSLoop b d prune nsti edges
@@ -1214,10 +1210,10 @@ pvQSearch !a !b = do
 {-# INLINE pvQLoop #-}
 pvQLoop :: Int -> Int -> Int -> Alt Move -> Search Int
 pvQLoop a b = go
-    where go !s (Alt [])     = return s
+    where go !s (Alt [])     = return $ trimax a b s
           go !s (Alt (e:es)) = do
               (ct, !s') <- pvQInnerLoop a b s e
-              if ct then return s'
+              if ct then return b
                     else go s' $ Alt es
 
 -- If we were in check and got no legal move, then we are mated (else continue a)
