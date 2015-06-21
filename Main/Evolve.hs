@@ -50,7 +50,7 @@ maxMaxThreads = 20
 -- Some constants for playing one match: hard coded part
 noGames, tcFixTm, expLength, toFact :: Int
 secPerMv :: Double
-noGames   = 2
+noGames   = 8
 tcFixTm   = 60	-- seconds
 secPerMv  = 1	-- seconds per move
 expLength = 200	-- expect a maximum game length of so may moves
@@ -453,11 +453,13 @@ oneMatch cf ev pgn p1 p2 = do
     when debug $ putStrLn $ "Start: " ++ unwords (cccli : args)
     (_, Just hout, _, ph)
             <- createProcess (proc cccli args) { std_out = CreatePipe, cwd = Just ccDir }
-    catch (everyLine hout (0, 0, 0) noGames) $ \e -> do
+    r <- catch (everyLine hout (0, 0, 0) noGames) $ \e -> do
         let es = ioeGetErrorString e
         putStrLn $ "Error in everyLine: " ++ es
         terminateProcess ph
         throwIO e
+    waitForProcess ph
+    return r
 
 everyLine :: Handle -> (Int, Int, Int) -> Int -> IO (Int, Int, Int)
 everyLine _ r 0 = return r
