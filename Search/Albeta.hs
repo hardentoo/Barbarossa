@@ -550,7 +550,7 @@ checkFailOrPVRoot xstats b d e s nst =  do
                             when (de >= minToStore) $ do
                                 let typ = 1	-- beta cut (score is lower limit) with move e
                                 ttStore de typ (pathScore b) e nodes'
-                            betaCut True (absdp sst) e
+                            betaCut True (absdp sst) e nodes'
                         let xpvslg = insertToPvs d pvg (pvsl nst)	-- the good
                             !csc = if s > b then combinePath s b else bestPath s b "1"
                         pindent $ "beta cut: " ++ show csc
@@ -564,7 +564,7 @@ checkFailOrPVRoot xstats b d e s nst =  do
                             when (de >= minToStore) $ do
                                 let typ = 2	-- best move so far (score is exact)
                                 ttStore de typ sc e nodes'
-                            betaCut True (absdp sst) e	-- not really cut, but good move
+                            betaCut True (absdp sst) e nodes'	-- not really cut, but good move
                         let xpvslg = insertToPvs d pvg (pvsl nst)	-- the good
                             nst1 = nst { cursc = s, nxtnt = nextNodeType (nxtnt nst),
                                          movno = mn + 1, pvsl = xpvslg, pvcont = emptySeq }
@@ -1047,7 +1047,7 @@ checkFailOrPVLoop xstats b d e s nst = do
                   when (de >= minToStore) $ do
                       let typ = 1	-- best move is e and is beta cut (score is lower limit)
                       ttStore de typ (pathScore b) e nodes'
-                  betaCut True (absdp sst) e -- anounce a beta move (for example, update history)
+                  betaCut True (absdp sst) e nodes' -- anounce a beta move (for example, update history)
               incBeta mn
               -- when debug $ logmes $ "<-- pvInner: beta cut: " ++ show s ++ ", return " ++ show b
               let !csc = if s > b then combinePath s b else bestPath s b "3"
@@ -1059,7 +1059,7 @@ checkFailOrPVLoop xstats b d e s nst = do
                   when (de >= minToStore) $ do
                       let typ = 2	-- score is exact
                       ttStore de typ (pathScore s) e nodes'
-                  betaCut True (absdp sst) e -- not really a cut, but good move here
+                  betaCut True (absdp sst) e nodes' -- not really a cut, but good move here
               let !nst1 = nst { cursc = s, nxtnt = nextNodeType (nxtnt nst),
                                 movno = mn+1, pvcont = emptySeq }
               return (False, nst1)
@@ -1074,7 +1074,7 @@ checkFailOrPVLoopZ xstats b d e s nst = do
        then do
             -- when in a cut node and the move dissapointed - negative history - ???
             when (useNegHist && mn <= negHistMNo)
-                 $ lift $ betaCut False (absdp sst) e
+                 $ lift $ betaCut False (absdp sst) e 0
             !kill1 <- newKiller d s nst
             let !nst1 = nst { movno = mn+1, killer = kill1, pvcont = emptySeq }
             return (False, nst1)
@@ -1087,7 +1087,7 @@ checkFailOrPVLoopZ xstats b d e s nst = do
              when (de >= minToStore) $ do
                  let typ = 1	-- best move is e and is beta cut (score is lower limit)
                  ttStore de typ (pathScore b) e nodes'
-             betaCut True (absdp sst) e -- anounce a beta move (for example, update history)
+             betaCut True (absdp sst) e nodes' -- anounce a beta move (for example, update history)
          incBeta mn
          let !csc = if s > b then combinePath s b else bestPath s b "4"
          pindent $ "beta cut: " ++ show csc

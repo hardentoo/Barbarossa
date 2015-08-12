@@ -24,14 +24,13 @@ adr m = cols * f + t
 newHist :: IO History
 newHist = V.replicate vsize 0
 
-histw :: Int -> Int
-histw !d = 1 `unsafeShiftL` dm
-    where !dm = maxd - d
-          maxd = 20
+histw :: Int -> Int -> Int
+histw !d !n = (maxl - n) `unsafeShiftR` d
+    where maxl = 1 `unsafeShiftL` 31
 
-toHist :: History -> Bool -> Move -> Int -> IO ()
-toHist h True  m d = addHist h (adr m) (histw d)
-toHist h False m d = subHist h (adr m) (histw d)
+toHist :: History -> Bool -> Move -> Int -> Int -> IO ()
+toHist h True  m d n = addHist h (adr m) (histw d n)
+toHist h False m d n = subHist h (adr m) (histw d n)
 
 {-# INLINE valHist #-}
 valHist :: History -> Move -> IO Int
