@@ -99,7 +99,8 @@ genMoves = do
                 l1 = genMoveTransf p
                 (l2w, l2l) = genMoveCaptWL p
                 l3'= genMoveNCapt p
-            l3 <- sortMovesFromHist l3'
+            -- l3 <- sortMovesFromHist l3'
+            l3 <- sortMovesDiffHist l3'
             return $! if loosingLast
                          then (l1 ++ l2w, l0 ++ l3 ++ l2l)
                          else (l1 ++ l2w ++ l2l, l0 ++ l3)
@@ -146,6 +147,12 @@ sortMovesFromHist mvs = do
     mvsc <- liftIO $ mapM (\m -> valHist (hist s) m) mvs
     let (posi, zero) = partition ((/=0) . snd) $ zip mvs mvsc
     return $! map fst $ sortBy (comparing snd) posi ++ zero
+
+sortMovesDiffHist :: [Move] -> Game [Move]
+sortMovesDiffHist mvs = do
+    s <- get
+    mvsc <- liftIO $ mapM (\m -> valHist (hist s) m) mvs
+    return $! map fst $ sortBy (comparing snd) $ zip mvs mvsc
 
 -- massert :: String -> Game Bool -> Game ()
 -- massert s mb = do

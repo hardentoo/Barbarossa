@@ -1,6 +1,6 @@
 {-# LANGUAGE BangPatterns #-}
 module Moves.History (
-        History, newHist, toHist, valHist
+        History, newHist, toHist, valHist, difHist
     ) where
 
 import Data.Bits
@@ -35,6 +35,21 @@ toHist h False m d n = subHist h (adr m) (histw d n)
 {-# INLINE valHist #-}
 valHist :: History -> Move -> IO Int
 valHist !h = V.unsafeRead h . adr
+
+{-# INLINE difHist #-}
+difHist :: History -> Move -> IO Int
+difHist !h !m = do
+    fv <- V.unsafeRead h fa
+    tv <- V.unsafeRead h ta
+    return $! fv - tv
+    where b | moveColor m == White = e
+            | otherwise            = 6 + e
+          e  = fromEnum $ movePiece m
+          ba = cols * b
+          f  = fromSquare m
+          t  = toSquare m
+          fa = ba + f
+          ta = ba + t
 
 addHist :: History -> Int -> Int -> IO ()
 addHist h !ad !p = do
