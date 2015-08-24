@@ -151,7 +151,7 @@ sortMovesFromHist mvs = do
 sortMovesDiffHist :: [Move] -> Game [Move]
 sortMovesDiffHist mvs = do
     s <- get
-    mvsc <- liftIO $ mapM (\m -> valHist (hist s) m) mvs
+    mvsc <- liftIO $ mapM (\m -> difHist (hist s) m) mvs
     return $! map fst $ sortBy (comparing snd) $ zip mvs mvsc
 
 -- massert :: String -> Game Bool -> Game ()
