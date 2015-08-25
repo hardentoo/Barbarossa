@@ -25,7 +25,7 @@ newHist :: IO History
 newHist = V.replicate vsize 0
 
 histw :: Int -> Int -> Int
-histw !d !n = (maxl - n) `unsafeShiftR` d
+histw !d !n = (maxl + n) `unsafeShiftR` d
     where maxl = 1 `unsafeShiftL` 25
 
 toHist :: History -> Bool -> Move -> Int -> Int -> IO ()
