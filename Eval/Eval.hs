@@ -226,8 +226,8 @@ instance EvalItem KingSafe where
 -- if we eliminate the lists
 kingSafe :: MyPos -> EvalWeights -> MidEnd -> MidEnd
 kingSafe !p !ew !mide = madm mide (ewKingSafe ew) ksafe
-    where !ksafe = ksSide (yo p) (yoKAttacs p) (myPAttacs p) (myNAttacs p) (myBAttacs p) (myRAttacs p) (myQAttacs p) (myKAttacs p) (myAttacs p)
-                 - ksSide (me p) (myKAttacs p) (yoPAttacs p) (yoNAttacs p) (yoBAttacs p) (yoRAttacs p) (yoQAttacs p) (yoKAttacs p) (yoAttacs p)
+    where !ksafe = ksSide (yo p) (yoAttacs p) (yoKAttacs p) (myPAttacs p) (myNAttacs p) (myBAttacs p) (myRAttacs p) (myQAttacs p) (myKAttacs p) (myAttacs p)
+                 - ksSide (me p) (myAttacs p) (myKAttacs p) (yoPAttacs p) (yoNAttacs p) (yoBAttacs p) (yoRAttacs p) (yoQAttacs p) (yoKAttacs p) (yoAttacs p)
 
 {--
           !freem = popCount $ myKAttacs p `less` (yoAttacs p .|. me p)
@@ -277,11 +277,12 @@ fadd (Flc f1 q1) (Flc f2 q2) = Flc (f1+f2) (q1+q2)
 fmul :: Flc -> Int
 fmul (Flc f q) = f * q
 
-ksSide :: BBoard -> BBoard -> BBoard -> BBoard -> BBoard -> BBoard -> BBoard -> BBoard -> BBoard -> Int
-ksSide !yop !yok !myp !myn !myb !myr !myq !myk !mya
+ksSide :: BBoard -> BBoard -> BBoard -> BBoard -> BBoard -> BBoard -> BBoard -> BBoard -> BBoard -> BBoard -> Int
+ksSide !yop !yoa !yok !myp !myn !myb !myr !myq !myk !mya
     | myq == 0  = 0
     | otherwise = mattacs
     where !freey = popCount $ yok `less` (mya .|. yop)
+          !defnd = popCount $ yok .&. mya .&. yoa
           qual a p = let c = popCount $ yok .&. a
                      in Flc (flaCoef `unsafeAt` c) (c * p)
           -- qualWeights = [1, 2, 2, 4, 8, 2]
@@ -291,7 +292,8 @@ ksSide !yop !yok !myp !myn !myb !myr !myq !myk !mya
           !qr = qual myr 4
           !qq = qual myq 8
           !qk = qual myk 2
-          !ixm = 8 + (fmul (fadd qp $ fadd qn $ fadd qb $ fadd qr $ fadd qq qk) `unsafeShiftR` 2) - freey
+          !ixm = (fmul (fadd qp $ fadd qn $ fadd qb $ fadd qr $ fadd qq qk) `unsafeShiftR` 2)
+                 + 16 - freey - defnd
           !mattacs = attCoef `unsafeAt` ixm
           -- !mattacs = attCoef ! ixm
 
@@ -301,7 +303,7 @@ flaCoef :: UArray Int Int
 flaCoef = listArray (0, 8) [ 0, 1, 1, 1, 1, 1, 1, 1, 1 ]
 
 attCoef :: UArray Int Int
-attCoef = listArray (0, 127) $ (take 8 $ repeat 0) ++ [ f x | x <- [0..63] ] ++ repeat (f 63)
+attCoef = listArray (0, 148) $ (take 16 $ repeat 0) ++ [ f x | x <- [0..63] ] ++ repeat (f 63)
     where f :: Int -> Int
           f x = let y = fromIntegral x :: Double in round $ (2.92968750 - 0.03051758*y)*y*y
 
