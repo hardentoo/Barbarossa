@@ -226,47 +226,12 @@ instance EvalItem KingSafe where
 -- if we eliminate the lists
 kingSafe :: MyPos -> EvalWeights -> MidEnd -> MidEnd
 kingSafe !p !ew !mide = madm mide (ewKingSafe ew) ksafe
-    where !ksafe = ksSide (yo p) (yoAttacs p) (yoKAttacs p) (myPAttacs p) (myNAttacs p) (myBAttacs p) (myRAttacs p) (myQAttacs p) (myKAttacs p) (myAttacs p)
-                 - ksSide (me p) (myAttacs p) (myKAttacs p) (yoPAttacs p) (yoNAttacs p) (yoBAttacs p) (yoRAttacs p) (yoQAttacs p) (yoKAttacs p) (yoAttacs p)
-
-{--
-          !freem = popCount $ myKAttacs p `less` (yoAttacs p .|. me p)
-          !freey = popCount $ yoKAttacs p `less` (myAttacs p .|. yo p)
-          flag k a = if k .&. a /= 0 then 1 else 0
-          qual k a = popCount $ k .&. a
-          flagYo = flag (myKAttacs p)
-          flagMe = flag (yoKAttacs p)
-          qualYo = qual (myKAttacs p)
-          qualMe = qual (yoKAttacs p)
-          ($:) = flip ($)
-          attsm = map (p $:) [ myPAttacs, myNAttacs, myBAttacs, myRAttacs, myQAttacs, myKAttacs ]
-          !ixm = max 0 $ min 63 $ (fm * cm) `unsafeShiftR` 2 - freey
-          attsy = map (p $:) [ yoPAttacs, yoNAttacs, yoBAttacs, yoRAttacs, yoQAttacs, yoKAttacs ]
-          !ixy = max 0 $ min 63 $ (fy * cy) `unsafeShiftR` 2 - freem
-          !mattacs = attCoef `unsafeAt` ixm
-          !yattacs = attCoef `unsafeAt` ixy
-          qualWeights = [1, 2, 2, 4, 8, 2]
-          !(Flc fm cm) = sumCount flagMe qualMe $ zip attsm qualWeights
-          !(Flc fy cy) = sumCount flagYo qualYo $ zip attsy qualWeights
-
-{-# INLINE ksSide #-}
-ksSide :: BBoard -> BBoard -> BBoard -> BBoard -> BBoard -> BBoard -> BBoard -> BBoard -> BBoard -> Int
-ksSide !yop !yok !myp !myn !myb !myr !myq !myk !mya
-    | myq == 0  = 0
-    | otherwise = mattacs
-    where !freey = popCount $ yok `less` (mya .|. yop)
-          flag a = if yok .&. a /= 0 then 1 else 0
-          qual a = popCount $ yok .&. a
-          attsm  = [ myp, myn, myb, myr, myq, myk ]
-          !ixm   = max 0 $ min 63 $ (fm * cm) `unsafeShiftR` 2 - freey
-          !mattacs = attCoef `unsafeAt` ixm
-          qualWeights = [1, 2, 2, 4, 8, 2]
-          !(Flc fm cm) = sumCount flag qual $ zip attsm qualWeights
-
-{-# INLINE sumCount #-}
-sumCount :: (BBoard -> Int) -> (BBoard -> Int) -> [(BBoard, Int)] -> Flc
-sumCount flag qual = foldl' (\(Flc f c) (b, i) -> Flc (f + flag b) (c + i * qual b)) (Flc 0 0)
---}
+    where !ksafe = ksSi (yoPAttacs p) (yoNAttacs p) (yoBAttacs p) (yoRAttacs p) (yoQAttacs p) (yoKAttacs p)
+                        (myPAttacs p) (myNAttacs p) (myBAttacs p) (myRAttacs p) (myQAttacs p) (myKAttacs p)
+                        (myAttacs p)
+                 - ksSi (myPAttacs p) (myNAttacs p) (myBAttacs p) (myRAttacs p) (myQAttacs p) (myKAttacs p)
+                        (yoPAttacs p) (yoNAttacs p) (yoBAttacs p) (yoRAttacs p) (yoQAttacs p) (yoKAttacs p)
+                        (yoAttacs p)
 
 -- To make the sum and count in one pass
 data Flc = Flc !Int !Int
@@ -277,14 +242,15 @@ fadd (Flc f1 q1) (Flc f2 q2) = Flc (f1+f2) (q1+q2)
 fmul :: Flc -> Int
 fmul (Flc f q) = f * q
 
-ksSide :: BBoard -> BBoard -> BBoard -> BBoard -> BBoard -> BBoard -> BBoard -> BBoard -> BBoard -> BBoard -> Int
-ksSide !yop !yoa !yok !myp !myn !myb !myr !myq !myk !mya
+ksSi :: BBoard -> BBoard -> BBoard -> BBoard -> BBoard -> BBoard -> BBoard -> BBoard -> BBoard -> BBoard -> BBoard -> BBoard -> BBoard -> Int
+ksSi !yop !yon !yob !yor !yoq !yok !myp !myn !myb !myr !myq !myk !mya
     | myq == 0  = 0
     | otherwise = mattacs
-    where !freey = popCount $ yok `less` (mya .|. yop)
-          !defnd = popCount $ yok .&. mya .&. yoa
-          qual a p = let c = popCount $ yok .&. a
-                     in Flc (flaCoef `unsafeAt` c) (c * p)
+    where !defnd = popCount $ yok .&. mya .&. (yop .|. yon .|. yob .|. yor .|. yoq)
+          qual a p = let !c = popCount $ yok .&. a
+                         !f | c == 0    = 0
+                            | otherwise = 1
+                     in Flc f (c * p)
           -- qualWeights = [1, 2, 2, 4, 8, 2]
           !qp = qual myp 1
           !qn = qual myn 2
@@ -293,17 +259,11 @@ ksSide !yop !yoa !yok !myp !myn !myb !myr !myq !myk !mya
           !qq = qual myq 8
           !qk = qual myk 2
           !ixm = (fmul (fadd qp $ fadd qn $ fadd qb $ fadd qr $ fadd qq qk) `unsafeShiftR` 2)
-                 + 16 - freey - defnd
+                 + 8 - defnd
           !mattacs = attCoef `unsafeAt` ixm
-          -- !mattacs = attCoef ! ixm
-
--- We want to eliminate "if yok .&. a /= 0 ..."
--- by using an array
-flaCoef :: UArray Int Int
-flaCoef = listArray (0, 8) [ 0, 1, 1, 1, 1, 1, 1, 1, 1 ]
 
 attCoef :: UArray Int Int
-attCoef = listArray (0, 148) $ (take 16 $ repeat 0) ++ [ f x | x <- [0..63] ] ++ repeat (f 63)
+attCoef = listArray (0, 148) $ (take 8 $ repeat 0) ++ [ f x | x <- [0..63] ] ++ repeat (f 63)
     where f :: Int -> Int
           f x = let y = fromIntegral x :: Double in round $ (2.92968750 - 0.03051758*y)*y*y
 
