@@ -1015,7 +1015,7 @@ pvInnerLoopExtenZ b d spec !exd nst redu = do
     viztreeABD (pathScore negb) (pathScore onemB) d'
     if not redu || d' == d1
        then do
-           moreLMR True 1	-- more LMR
+           moreLMR True	-- more LMR
            fmap pnextlev (pvZeroW nst onemB d' nulMoves redu)
        else do
            incRedu
@@ -1033,7 +1033,7 @@ pvInnerLoopExtenZ b d spec !exd nst redu = do
                    lift $ finNode "LMRM" True
            if sr < b
               then do
-                  moreLMR True 1	-- more LMR
+                  moreLMR True	-- more LMR
                   return sr	-- failed low (as expected)
               else do
                 -- was reduced and didn't fail low: re-search with full depth
@@ -1042,14 +1042,14 @@ pvInnerLoopExtenZ b d spec !exd nst redu = do
                 -- sts <- get
                 -- let nds1 = sNodes $ stats sts
                 incReSe nodre	-- so many nodes we wasted by reducing this time
-                moreLMR False d'	-- less LMR
+                moreLMR False	-- less LMR
                 -- Should we expect here to fail high? I.e. change the crt/nxt node type?
                 let nst1 = if nullSeq (pathMoves sr)
                               then nst
                               else nst { pvcont = pathMoves sr }
                 viztreeABD (pathScore negb) (pathScore onemB) d1
                 sf <- fmap pnextlev (pvZeroW nst1 onemB d1 nulMoves True)
-                when (sf >= b) $ moreLMR False d1
+                when (sf >= b) $ moreLMR False
                 return sf
 
 checkFailOrPVLoop :: SStats -> Path -> Int -> Move -> Path
@@ -1167,23 +1167,19 @@ reduceLmr !d nearmatea !spec !exd lmrlev w
 
 -- Adjust the LMR related parameters in the state
 -- The correct constants have to be tuned! Some are hadcoded here
-moreLMR :: Bool -> Int -> Search ()
-moreLMR more !d = do
+moreLMR :: Bool -> Search ()
+moreLMR True = do
     s <- get
-    let !i  | more      = 1
-            | otherwise = - (1 `unsafeShiftL` d)
-        !i1 = lmrrs s + i
-    if i1 < 0
-       then if lmrlv s <= lmrLevMin
-               then put s { lmrhi = find (lmrhi s), lmrrs = 0 }
-               else put s { lmrlv = lmrlv s - 1 }
-       else if i1 > lmrhi s
-               then if lmrlv s >= lmrLevMax
-                       then put s { lmrhi = fdir (lmrhi s), lmrrs = 0 }
-                       else put s { lmrlv = lmrlv s + 1 }
-               else put s { lmrrs = i1 }
-    where fdir x = x `unsafeShiftL` 2
-          find x = max 1 $ x `unsafeShiftR` 1
+    let !i1 = lmrrs s + 1
+    if i1 > lmrhi s
+       then if lmrlv s >= lmrLevMax
+               then put s { lmrhi = fdir (lmrhi s), lmrrs = 0 }
+               else put s { lmrlv = lmrlv s + 1 }
+       else put s { lmrrs = i1 }
+    where fdir x = x `unsafeShiftL` 1
+moreLMR False = do
+    s <- get
+    when (lmrlv s > lmrLevMin) $ put s { lmrlv = lmrlv s - 1 }
 
 {--
 -- The UnsafeIx inspired from GHC.Arr (class Ix)
