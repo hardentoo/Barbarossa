@@ -72,8 +72,8 @@ lmrDebug    = False
 lmrInitLv, lmrInitLim, lmrLevMin, lmrLevMax :: Int
 lmrInitLv   = 9
 lmrInitLim  = 16500
-lmrLevMin   = 0
-lmrLevMax   = 15
+lmrLevMin   = 7
+lmrLevMax   = 12
 
 -- The late move reduction is variable and regulated by the number of re-searches
 -- Lower levels (towards 0) means less reductions, higher - more
@@ -1174,7 +1174,7 @@ moreLMR True = do
     if i1 > lmrhi s
        then if lmrlv s >= lmrLevMax
                then put s { lmrhi = fdir (lmrhi s), lmrrs = 0 }
-               else put s { lmrlv = lmrlv s + 1 }
+               else put s { lmrlv = lmrlv s + 1, lmrrs = 0 }
        else put s { lmrrs = i1 }
     where fdir x = x `unsafeShiftL` 1
 moreLMR False = do
