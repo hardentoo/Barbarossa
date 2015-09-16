@@ -255,7 +255,7 @@ ksSide !yop !yok !myp !myn !myb !myr !myq !myk !mya
           !ixm = fmul (fadd qp $ fadd qn $ fadd qb $ fadd qr $ fadd qq qk) `unsafeShiftR` 2
                + 8 + ksShift - freey
           !mattacs = attCoef `unsafeAt` ixm
-          ksShift = 5
+          ksShift = 15
 
 -- We want to eliminate "if yok .&. a /= 0 ..."
 -- by using an array
