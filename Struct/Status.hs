@@ -202,8 +202,8 @@ instance CollectParams EvalWeights where
           ewBishopPair      = tme 363  388,
           ewRedundanceRook  = tme   0 (-105),
           ewRookPawn        = tme (-51) (-42),
-          ewAdvPawn5        = tme   10  130,
-          ewAdvPawn6        = tme  440  500,
+          ewAdvPawn5        = tme   31  159,	-- After Evalo (200 steps):
+          ewAdvPawn6        = tme  469  532,	-- length 8, depth 5, batch 64
           ewPawnBlockP      = tme (-116)(-105),
           ewPawnBlockO      = tme (-23) (-27),
           ewPawnBlockA      = tme (-14) (-73),
